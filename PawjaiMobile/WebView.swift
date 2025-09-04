@@ -72,12 +72,16 @@ struct WebViewContainer: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var webView: WKWebView?
+    @State private var currentURL: URL
+    @StateObject private var supabaseManager = SupabaseManager.shared
     
-    let url: URL
+    init(url: URL) {
+        self._currentURL = State(initialValue: url)
+    }
     
     var body: some View {
         ZStack {
-            WebView(url: url, isLoading: $isLoading, errorMessage: $errorMessage)
+            WebView(url: currentURL, isLoading: $isLoading, errorMessage: $errorMessage)
                 .edgesIgnoringSafeArea(.all)
             
             if isLoading {
@@ -118,6 +122,31 @@ struct WebViewContainer: View {
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(.systemBackground))
+            }
+            
+            // Sign out button (top-right corner)
+            VStack {
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        supabaseManager.signOut()
+                    }) {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.red)
+                            .clipShape(Circle())
+                    }
+                    .padding(.trailing, 16)
+                    .padding(.top, 16)
+                }
+                Spacer()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .navigateToURL)) { notification in
+            if let url = notification.userInfo?["url"] as? URL {
+                currentURL = url
             }
         }
     }

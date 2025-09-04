@@ -1,77 +1,70 @@
-# PawjaiMobile
+# Pawjai Mobile App
 
-A native iOS app that provides a webview wrapper for the Pawjai authentication system.
+A native iOS wrapper for the Pawjai web application with integrated authentication.
 
 ## Features
 
-- **Native WebView**: Uses WKWebView for optimal performance and native feel
-- **Authentication Focus**: Opens directly to `pawjai.co/auth/signin`
-- **Error Handling**: Graceful error handling with retry functionality
-- **Loading States**: Visual feedback during page loading
-- **Gesture Support**: Supports back/forward navigation gestures
-- **Full Screen**: Web content takes up the full screen area
-
-## Technical Details
-
-- **Platform**: iOS (SwiftUI + UIKit)
-- **Minimum iOS Version**: iOS 14.0+
-- **Architecture**: SwiftUI with UIViewRepresentable for WebView integration
-- **Network Security**: Configured to allow web content and network access via project settings
-
-## Project Structure
-
-```
-PawjaiMobile/
-├── PawjaiMobile/
-│   ├── PawjaiMobileApp.swift      # Main app entry point
-│   ├── ContentView.swift          # Main view using WebView
-│   ├── WebView.swift              # WebView wrapper and container
-│   └── Assets.xcassets/           # App assets
-├── PawjaiMobile.xcodeproj/        # Xcode project file with web permissions
-└── README.md                      # This file
-```
+- **Native OAuth**: Full Google OAuth integration using ASWebAuthenticationSession
+- **Token Management**: Handles authorization code exchange for access/refresh tokens
+- **WebView Integration**: Seamless web app experience within native shell
+- **Deep Link Support**: Handles OAuth callbacks via `pawjai://auth-callback`
+- **Sign Out**: Native sign-out functionality
 
 ## Setup Instructions
 
+### 1. Xcode Configuration
+
 1. Open `PawjaiMobile.xcodeproj` in Xcode
-2. Select your target device or simulator
-3. Build and run the project (⌘+R)
+2. Add custom URL scheme:
+   - Go to Project Settings → Info → URL Types
+   - Add new URL Type with:
+     - Identifier: `pawjai-auth`
+     - URL Schemes: `pawjai`
 
-## Configuration
+### 2. Supabase Configuration
 
-The app is configured with the following settings in the Xcode project:
+1. Update `Configuration.swift` with your actual Supabase anon key:
+   ```swift
+   static let supabaseAnonKey = "your_actual_anon_key_here"
+   ```
 
-- **App Transport Security**: Allows web content and network access
-- **Device Orientation**: Supports portrait and landscape orientations
-- **Scene Configuration**: Modern iOS app lifecycle management
+2. In Supabase Dashboard → Auth → Redirect URLs, add:
+   ```
+   pawjai://auth-callback
+   ```
 
-## Customization
+### 3. Web App Integration
 
-### Changing the URL
-To change the opening URL, modify the URL in `ContentView.swift`:
+The mobile app integrates with the web app through:
+- `/auth/native-handoff` - Handles token handoff from native to web
+- `/auth/callback` - Processes OAuth callbacks
+- `/auth/signin` - Web-based sign-in page
 
-```swift
-WebViewContainer(url: URL(string: "https://your-new-url.com")!)
-```
+## Architecture
 
-### Adding Navigation Controls
-The WebView supports standard web navigation gestures. You can add custom navigation buttons by extending the `WebViewContainer`.
+### Authentication Flow
 
-### Styling
-The app uses SwiftUI's native styling. Modify colors, fonts, and layouts in the respective view files.
+1. User taps "Sign in with Google" in native app
+2. Native app opens ASWebAuthenticationSession with Supabase OAuth URL
+3. User completes Google OAuth in the native session
+4. OAuth callback returns authorization code to native app
+5. Native app exchanges authorization code for access/refresh tokens
+6. App navigates to dashboard WebView with authenticated session
 
-## Troubleshooting
+### Key Components
 
-### Web Content Not Loading
-- Check your internet connection
-- Verify the URL is accessible from your device
-- Check the console for any error messages
+- **AuthView**: Native sign-in interface
+- **SupabaseManager**: Handles authentication state
+- **WebViewContainer**: Displays web app with native controls
+- **Configuration**: Centralized app configuration
 
-### Build Issues
-- Ensure you're using Xcode 14.0 or later
-- Clean build folder (Shift+⌘+K) and rebuild
-- Check that all files are included in the project target
+## Development
 
-## License
+The app uses SwiftUI and follows a simple MVVM pattern. The authentication is handled through a combination of native UI and web-based OAuth flow for simplicity and reliability.
 
-This project is part of the Pawjai application suite.
+## Notes
+
+- The implementation uses native OAuth with proper token management
+- Tokens are stored in memory and exchanged via Supabase's token endpoint
+- The app assumes the web app is accessible at `https://pawjai.co`
+- For production, consider implementing secure token storage (Keychain)
