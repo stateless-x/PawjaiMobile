@@ -7,6 +7,7 @@
 
 import Foundation
 import AuthenticationServices
+import Security
 
 class SupabaseManager: NSObject, ObservableObject {
     static let shared = SupabaseManager()
@@ -25,6 +26,117 @@ class SupabaseManager: NSObject, ObservableObject {
         self.supabaseAnonKey = Configuration.supabaseAnonKey
         self.redirectURL = Configuration.redirectURL
         super.init()
+        
+        // Check for existing authentication state
+        checkAuthenticationState()
+    }
+    
+    private func checkAuthenticationState() {
+        // Check for stored authentication tokens
+        if let storedUser = loadStoredUser() {
+            // Check if tokens are still valid (not expired)
+            if isTokenValid(user: storedUser) {
+                self.currentUser = storedUser
+                self.isAuthenticated = true
+                print("📱 Restored authentication state from storage")
+            } else {
+                // Tokens expired, clear storage
+                clearStoredTokens()
+                self.isAuthenticated = false
+                self.currentUser = nil
+                print("📱 Stored tokens expired, clearing authentication state")
+            }
+        } else {
+            self.isAuthenticated = false
+            self.currentUser = nil
+            print("📱 No stored authentication found, showing AuthView")
+        }
+    }
+    
+    // MARK: - Keychain Storage Methods
+    
+    private func saveTokens(accessToken: String, refreshToken: String) {
+        // Save to Keychain
+        saveToKeychain(accessToken, forKey: "access_token")
+        saveToKeychain(refreshToken, forKey: "refresh_token")
+        saveToKeychain(String(Date().timeIntervalSince1970), forKey: "token_timestamp")
+        print("📱 Tokens saved to Keychain")
+    }
+    
+    private func loadStoredUser() -> User? {
+        guard let accessToken = loadFromKeychain(forKey: "access_token"),
+              let refreshToken = loadFromKeychain(forKey: "refresh_token") else {
+            return nil
+        }
+        
+        return User(accessToken: accessToken, refreshToken: refreshToken)
+    }
+    
+    private func isTokenValid(user: User) -> Bool {
+        guard let timestampString = loadFromKeychain(forKey: "token_timestamp"),
+              let timestamp = Double(timestampString) else {
+            return false
+        }
+        
+        let tokenAge = Date().timeIntervalSince1970 - timestamp
+        // Consider tokens valid for 24 hours (86400 seconds)
+        return tokenAge < 86400
+    }
+    
+    private func clearStoredTokens() {
+        deleteFromKeychain(forKey: "access_token")
+        deleteFromKeychain(forKey: "refresh_token")
+        deleteFromKeychain(forKey: "token_timestamp")
+        print("📱 Tokens cleared from Keychain")
+    }
+    
+    // MARK: - Keychain Helper Methods
+    
+    private func saveToKeychain(_ value: String, forKey key: String) {
+        let data = value.data(using: .utf8)!
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecValueData as String: data
+        ]
+        
+        // Delete existing item first
+        SecItemDelete(query as CFDictionary)
+        
+        // Add new item
+        let status = SecItemAdd(query as CFDictionary, nil)
+        if status != errSecSuccess {
+            print("📱 Failed to save to Keychain: \(status)")
+        }
+    }
+    
+    private func loadFromKeychain(forKey key: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        
+        if status == errSecSuccess,
+           let data = result as? Data,
+           let value = String(data: data, encoding: .utf8) {
+            return value
+        }
+        
+        return nil
+    }
+    
+    private func deleteFromKeychain(forKey key: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key
+        ]
+        
+        SecItemDelete(query as CFDictionary)
     }
     
     // MARK: - Authentication Methods
@@ -68,7 +180,7 @@ class SupabaseManager: NSObject, ObservableObject {
         
         components.queryItems = [
             URLQueryItem(name: "provider", value: "google"),
-            URLQueryItem(name: "redirect_to", value: Configuration.redirectURL), // Use native app callback
+            URLQueryItem(name: "redirect_to", value: Configuration.redirectURL),
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "access_type", value: "offline"),
             URLQueryItem(name: "prompt", value: "consent")
@@ -89,7 +201,36 @@ class SupabaseManager: NSObject, ObservableObject {
         print("📱 URL query: \(url.query ?? "nil")")
         print("📱 URL fragment: \(url.fragment ?? "nil")")
         
-        // Check if tokens are in the URL fragment (after #)
+        // Parse URL components
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            errorMessage = "Invalid callback URL"
+            return
+        }
+        
+        // Check for error in query parameters
+        if let error = components.queryItems?.first(where: { $0.name == "error" })?.value {
+            errorMessage = "OAuth error: \(error)"
+            return
+        }
+        
+        // Check for error in fragment
+        if let fragment = url.fragment {
+            var fragmentComponents = URLComponents()
+            fragmentComponents.query = fragment
+            if let error = fragmentComponents.queryItems?.first(where: { $0.name == "error" })?.value {
+                errorMessage = "OAuth error: \(error)"
+                return
+            }
+        }
+        
+        // Extract authorization code from query parameters
+        if let code = components.queryItems?.first(where: { $0.name == "code" })?.value {
+            print("📱 Found authorization code, exchanging for tokens")
+            exchangeCodeForTokens(code: code)
+            return
+        }
+        
+        // Check if tokens are in the URL fragment (direct token response)
         if let fragment = url.fragment {
             print("📱 Parsing fragment: \(fragment)")
             var fragmentComponents = URLComponents()
@@ -103,7 +244,6 @@ class SupabaseManager: NSObject, ObservableObject {
             // Extract tokens from fragment
             var accessToken: String?
             var refreshToken: String?
-            var error: String?
             
             for item in fragmentItems {
                 switch item.name {
@@ -111,79 +251,34 @@ class SupabaseManager: NSObject, ObservableObject {
                     accessToken = item.value
                 case "refresh_token":
                     refreshToken = item.value
-                case "error":
-                    error = item.value
                 default:
                     break
                 }
             }
             
-            if let error = error {
-                errorMessage = "OAuth error: \(error)"
-                return
-            }
-            
-            guard let accessToken = accessToken, let refreshToken = refreshToken else {
-                errorMessage = "Missing authentication tokens in fragment"
-                return
-            }
-            
-            // Store tokens and mark as authenticated
-            self.isAuthenticated = true
-            self.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
-            
-            // Navigate to native handoff endpoint with tokens
-            var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
-            handoffComponents.queryItems = [
-                URLQueryItem(name: "access_token", value: accessToken),
-                URLQueryItem(name: "refresh_token", value: refreshToken)
-            ]
-            
-            if let handoffURL = handoffComponents.url {
-                print("📱 Navigating to handoff URL: \(handoffURL)")
+            if let accessToken = accessToken, let refreshToken = refreshToken {
+                // Save tokens to Keychain for persistence
+                saveTokens(accessToken: accessToken, refreshToken: refreshToken)
+                
+                // Store tokens and mark as authenticated
+                self.isAuthenticated = true
+                self.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+                print("📱 Native app authentication successful with tokens")
+                
+                // Navigate to dashboard in WebView
+                let targetURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
+                print("📱 Navigating to WebView: \(targetURL)")
                 NotificationCenter.default.post(
                     name: .navigateToURL,
                     object: nil,
-                    userInfo: ["url": handoffURL]
+                    userInfo: ["url": targetURL]
                 )
-            }
-            return
-        }
-        
-        // Fallback: Parse the callback URL to extract the authorization code (old flow)
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let queryItems = components.queryItems else {
-            errorMessage = "Invalid callback URL"
-            return
-        }
-        
-        // Extract the authorization code or error
-        var code: String?
-        var error: String?
-        
-        for item in queryItems {
-            switch item.name {
-            case "code":
-                code = item.value
-            case "error":
-                error = item.value
-            default:
-                break
+                return
             }
         }
         
-        if let error = error {
-            errorMessage = "OAuth error: \(error)"
-            return
-        }
-        
-        guard let code = code else {
-            errorMessage = "No authorization code received"
-            return
-        }
-        
-        // Exchange the authorization code for tokens
-        exchangeCodeForTokens(code: code)
+        // If we get here, something went wrong
+        errorMessage = "No authorization code or tokens found in callback"
     }
     
     private func exchangeCodeForTokens(code: String) {
@@ -224,9 +319,13 @@ class SupabaseManager: NSObject, ObservableObject {
                         if let accessToken = json["access_token"] as? String,
                            let refreshToken = json["refresh_token"] as? String {
                             
+                            // Save tokens to Keychain for persistence
+                            self?.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
+                            
                             // Store tokens and mark as authenticated
                             self?.isAuthenticated = true
                             self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+                            print("📱 Token exchange successful, user authenticated")
                             
                             // Navigate to native handoff endpoint with tokens
                             var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
@@ -257,16 +356,17 @@ class SupabaseManager: NSObject, ObservableObject {
     
     
     func signOut() {
+        // Clear stored tokens from Keychain
+        clearStoredTokens()
+        
+        // Clear authentication state
         isAuthenticated = false
         currentUser = nil
         errorMessage = nil
         
-        // Navigate back to sign-in
-        NotificationCenter.default.post(
-            name: .navigateToURL,
-            object: nil,
-            userInfo: ["url": URL(string: "\(Configuration.webAppURL)/auth/signin")!]
-        )
+        // No need to navigate to URL - ContentView will automatically show AuthView
+        // when isAuthenticated becomes false
+        print("📱 User signed out, tokens cleared, returning to native AuthView")
     }
 }
 

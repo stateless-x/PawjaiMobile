@@ -51,6 +51,15 @@ struct WebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             DispatchQueue.main.async {
                 self.parent.isLoading = false
+                
+                // Check if the loaded page is a signin/signup page
+                if let url = webView.url {
+                    let path = url.path
+                    if path.contains("/auth/signin") || path.contains("/auth/signup") {
+                        print("🚫 WebView loaded signin/signup page, redirecting to native AuthView")
+                        SupabaseManager.shared.isAuthenticated = false
+                    }
+                }
             }
         }
         
@@ -62,7 +71,26 @@ struct WebView: UIViewRepresentable {
         }
         
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            // Allow all navigation actions
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+            
+            // Check if the web app is trying to redirect to signin/signup pages
+            let path = url.path
+            if path.contains("/auth/signin") || path.contains("/auth/signup") {
+                print("🚫 WebView trying to navigate to signin/signup, redirecting to native AuthView")
+                
+                // Redirect to native AuthView by setting authentication to false
+                DispatchQueue.main.async {
+                    SupabaseManager.shared.isAuthenticated = false
+                }
+                
+                decisionHandler(.cancel)
+                return
+            }
+            
+            // Allow all other navigation actions
             decisionHandler(.allow)
         }
     }
