@@ -71,11 +71,12 @@ struct WebView: UIViewRepresentable {
                     print("📱 WebView path: \(path)")
                     
                     // Only redirect to AuthView if we're actually on a signin/signup page
+                    // or if we're on the home page (which happens after sign-out)
                     // and not on a redirect or callback page
-                    if (path.contains("/auth/signin") || path.contains("/auth/signup")) && 
+                    if ((path.contains("/auth/signin") || path.contains("/auth/signup") || path == "/") && 
                        !path.contains("/auth/callback") && 
-                       !path.contains("/auth/native-handoff") {
-                        print("🚫 WebView loaded signin/signup page, redirecting to native AuthView")
+                       !path.contains("/auth/native-handoff")) {
+                        print("🚫 WebView loaded signin/signup/home page, redirecting to native AuthView")
                         SupabaseManager.shared.isAuthenticated = false
                     } else {
                         print("📱 WebView loaded valid page, staying in WebView")
@@ -115,11 +116,12 @@ struct WebView: UIViewRepresentable {
             print("📱 WebView navigation path: \(path)")
             
             // Only redirect to AuthView if we're actually navigating to a signin/signup page
+            // or to the home page (which happens after sign-out)
             // and not to a redirect or callback page
-            if (path.contains("/auth/signin") || path.contains("/auth/signup")) && 
+            if ((path.contains("/auth/signin") || path.contains("/auth/signup") || path == "/") && 
                !path.contains("/auth/callback") && 
-               !path.contains("/auth/native-handoff") {
-                print("🚫 WebView trying to navigate to signin/signup, redirecting to native AuthView")
+               !path.contains("/auth/native-handoff")) {
+                print("🚫 WebView trying to navigate to signin/signup/home, redirecting to native AuthView")
                 
                 // Redirect to native AuthView by setting authentication to false
                 DispatchQueue.main.async {
