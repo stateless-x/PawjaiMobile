@@ -19,6 +19,9 @@ struct WebView: UIViewRepresentable {
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.bounces = false
         
+        // Add message handler for sign-out
+        webView.configuration.userContentController.add(context.coordinator, name: "signOut")
+        
         // Load the URL
         let request = URLRequest(url: url)
         webView.load(request)
@@ -34,11 +37,20 @@ struct WebView: UIViewRepresentable {
         Coordinator(self)
     }
     
-    class Coordinator: NSObject, WKNavigationDelegate {
+    class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var parent: WebView
         
         init(_ parent: WebView) {
             self.parent = parent
+        }
+        
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "signOut" {
+                print("📱 Received sign-out message from WebView")
+                DispatchQueue.main.async {
+                    SupabaseManager.shared.signOut()
+                }
+            }
         }
         
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
@@ -55,9 +67,18 @@ struct WebView: UIViewRepresentable {
                 // Check if the loaded page is a signin/signup page
                 if let url = webView.url {
                     let path = url.path
-                    if path.contains("/auth/signin") || path.contains("/auth/signup") {
+                    print("📱 WebView finished loading: \(url.absoluteString)")
+                    print("📱 WebView path: \(path)")
+                    
+                    // Only redirect to AuthView if we're actually on a signin/signup page
+                    // and not on a redirect or callback page
+                    if (path.contains("/auth/signin") || path.contains("/auth/signup")) && 
+                       !path.contains("/auth/callback") && 
+                       !path.contains("/auth/native-handoff") {
                         print("🚫 WebView loaded signin/signup page, redirecting to native AuthView")
                         SupabaseManager.shared.isAuthenticated = false
+                    } else {
+                        print("📱 WebView loaded valid page, staying in WebView")
                     }
                 }
             }
@@ -76,9 +97,28 @@ struct WebView: UIViewRepresentable {
                 return
             }
             
+            // Handle custom URL schemes
+            if url.scheme == "pawjai" {
+                if url.host == "signout" {
+                    print("📱 Received pawjai://signout URL, triggering native sign-out")
+                    DispatchQueue.main.async {
+                        SupabaseManager.shared.signOut()
+                    }
+                }
+                decisionHandler(.cancel)
+                return
+            }
+            
             // Check if the web app is trying to redirect to signin/signup pages
             let path = url.path
-            if path.contains("/auth/signin") || path.contains("/auth/signup") {
+            print("📱 WebView navigation decision for: \(url.absoluteString)")
+            print("📱 WebView navigation path: \(path)")
+            
+            // Only redirect to AuthView if we're actually navigating to a signin/signup page
+            // and not to a redirect or callback page
+            if (path.contains("/auth/signin") || path.contains("/auth/signup")) && 
+               !path.contains("/auth/callback") && 
+               !path.contains("/auth/native-handoff") {
                 print("🚫 WebView trying to navigate to signin/signup, redirecting to native AuthView")
                 
                 // Redirect to native AuthView by setting authentication to false
@@ -88,6 +128,8 @@ struct WebView: UIViewRepresentable {
                 
                 decisionHandler(.cancel)
                 return
+            } else {
+                print("📱 WebView navigation allowed for: \(path)")
             }
             
             // Allow all other navigation actions

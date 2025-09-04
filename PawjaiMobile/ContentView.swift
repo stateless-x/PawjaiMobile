@@ -21,8 +21,26 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToURL)) { notification in
             if let url = notification.userInfo?["url"] as? URL {
+                print("📱 ContentView received navigateToURL notification: \(url)")
                 webViewURL = url
-                supabaseManager.isAuthenticated = true
+                // Ensure authentication state is set
+                if !supabaseManager.isAuthenticated {
+                    supabaseManager.isAuthenticated = true
+                }
+            }
+        }
+        .onAppear {
+            print("📱 ContentView appeared - isAuthenticated: \(supabaseManager.isAuthenticated)")
+            if supabaseManager.isAuthenticated && webViewURL == nil {
+                webViewURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
+                print("📱 Set WebView URL to dashboard: \(webViewURL?.absoluteString ?? "nil")")
+            }
+        }
+        .onChange(of: supabaseManager.isAuthenticated) { isAuthenticated in
+            print("📱 Authentication state changed to: \(isAuthenticated)")
+            if isAuthenticated && webViewURL == nil {
+                webViewURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
+                print("📱 Set WebView URL to dashboard after auth change: \(webViewURL?.absoluteString ?? "nil")")
             }
         }
     }

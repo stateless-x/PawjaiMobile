@@ -39,6 +39,18 @@ class SupabaseManager: NSObject, ObservableObject {
                 self.currentUser = storedUser
                 self.isAuthenticated = true
                 print("📱 Restored authentication state from storage")
+                
+                // Force UI update and notify ContentView to load dashboard
+                DispatchQueue.main.async {
+                    self.objectWillChange.send()
+                    let dashboardURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
+                    NotificationCenter.default.post(
+                        name: .navigateToURL,
+                        object: nil,
+                        userInfo: ["url": dashboardURL]
+                    )
+                    print("📱 Posted navigateToURL notification for restored auth state")
+                }
             } else {
                 // Tokens expired, clear storage
                 clearStoredTokens()
@@ -156,16 +168,23 @@ class SupabaseManager: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 self?.isLoading = false
                 
+                print("📱 OAuth callback received")
+                print("📱 Callback URL: \(callbackURL?.absoluteString ?? "nil")")
+                print("📱 Error: \(error?.localizedDescription ?? "nil")")
+                
                 if let error = error {
+                    print("📱 OAuth error: \(error.localizedDescription)")
                     self?.errorMessage = error.localizedDescription
                     return
                 }
                 
                 guard let callbackURL = callbackURL else {
+                    print("📱 No callback URL received")
                     self?.errorMessage = "No callback URL received"
                     return
                 }
                 
+                print("📱 Processing OAuth callback: \(callbackURL)")
                 self?.handleOAuthCallback(url: callbackURL)
             }
         }
@@ -189,6 +208,8 @@ class SupabaseManager: NSObject, ObservableObject {
         let oauthURL = components.url!
         print("🔗 OAuth URL: \(oauthURL)")
         print("🔗 Redirect URL: \(Configuration.redirectURL)")
+        print("🔗 Supabase URL: \(Configuration.supabaseURL)")
+        print("🔗 Web App URL: \(Configuration.webAppURL)")
         
         return oauthURL
     }
@@ -201,26 +222,27 @@ class SupabaseManager: NSObject, ObservableObject {
         print("📱 URL query: \(url.query ?? "nil")")
         print("📱 URL fragment: \(url.fragment ?? "nil")")
         
-        // Parse URL components
+        // Check if we have tokens directly in the fragment (Supabase direct response)
+        if let fragment = url.fragment, !fragment.isEmpty {
+            print("📱 Found tokens in fragment, parsing directly")
+            parseTokensFromFragment(fragment)
+            return
+        }
+        
+        // Parse URL components for query parameters
         guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            errorMessage = "Invalid callback URL"
+            DispatchQueue.main.async {
+                self.errorMessage = "Invalid callback URL"
+            }
             return
         }
         
         // Check for error in query parameters
         if let error = components.queryItems?.first(where: { $0.name == "error" })?.value {
-            errorMessage = "OAuth error: \(error)"
-            return
-        }
-        
-        // Check for error in fragment
-        if let fragment = url.fragment {
-            var fragmentComponents = URLComponents()
-            fragmentComponents.query = fragment
-            if let error = fragmentComponents.queryItems?.first(where: { $0.name == "error" })?.value {
-                errorMessage = "OAuth error: \(error)"
-                return
+            DispatchQueue.main.async {
+                self.errorMessage = "OAuth error: \(error)"
             }
+            return
         }
         
         // Extract authorization code from query parameters
@@ -230,55 +252,86 @@ class SupabaseManager: NSObject, ObservableObject {
             return
         }
         
-        // Check if tokens are in the URL fragment (direct token response)
-        if let fragment = url.fragment {
-            print("📱 Parsing fragment: \(fragment)")
-            var fragmentComponents = URLComponents()
-            fragmentComponents.query = fragment
-            
-            guard let fragmentItems = fragmentComponents.queryItems else {
-                errorMessage = "Invalid callback fragment"
-                return
+        // If we get here, something went wrong
+        DispatchQueue.main.async {
+            self.errorMessage = "No authorization code or tokens found in callback"
+        }
+    }
+    
+    private func parseTokensFromFragment(_ fragment: String) {
+        print("📱 Parsing tokens from fragment: \(fragment)")
+        
+        // Parse the fragment as URL query parameters
+        var fragmentComponents = URLComponents()
+        fragmentComponents.query = fragment
+        
+        guard let queryItems = fragmentComponents.queryItems else {
+            DispatchQueue.main.async {
+                self.errorMessage = "Failed to parse token fragment"
             }
-            
-            // Extract tokens from fragment
-            var accessToken: String?
-            var refreshToken: String?
-            
-            for item in fragmentItems {
-                switch item.name {
-                case "access_token":
-                    accessToken = item.value
-                case "refresh_token":
-                    refreshToken = item.value
-                default:
-                    break
+            return
+        }
+        
+        // Extract tokens from fragment
+        var accessToken: String?
+        var refreshToken: String?
+        
+        for item in queryItems {
+            switch item.name {
+            case "access_token":
+                accessToken = item.value
+            case "refresh_token":
+                refreshToken = item.value
+            case "error":
+                DispatchQueue.main.async {
+                    self.errorMessage = "OAuth error: \(item.value ?? "Unknown error")"
                 }
-            }
-            
-            if let accessToken = accessToken, let refreshToken = refreshToken {
-                // Save tokens to Keychain for persistence
-                saveTokens(accessToken: accessToken, refreshToken: refreshToken)
-                
-                // Store tokens and mark as authenticated
-                self.isAuthenticated = true
-                self.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
-                print("📱 Native app authentication successful with tokens")
-                
-                // Navigate to dashboard in WebView
-                let targetURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
-                print("📱 Navigating to WebView: \(targetURL)")
-                NotificationCenter.default.post(
-                    name: .navigateToURL,
-                    object: nil,
-                    userInfo: ["url": targetURL]
-                )
                 return
+            default:
+                break
             }
         }
         
-        // If we get here, something went wrong
-        errorMessage = "No authorization code or tokens found in callback"
+        guard let accessToken = accessToken, let refreshToken = refreshToken else {
+            DispatchQueue.main.async {
+                self.errorMessage = "Missing access_token or refresh_token in response"
+            }
+            return
+        }
+        
+        print("📱 Successfully extracted tokens from fragment")
+        
+        // Save tokens to Keychain for persistence
+        saveTokens(accessToken: accessToken, refreshToken: refreshToken)
+        
+        // Store tokens and mark as authenticated on main thread
+        DispatchQueue.main.async {
+            self.isAuthenticated = true
+            self.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+            print("📱 Direct token authentication successful")
+            print("📱 isAuthenticated set to: \(self.isAuthenticated)")
+            
+            // Force UI update
+            self.objectWillChange.send()
+            
+            // Navigate to native-handoff to set up web app session, then redirect to dashboard
+            var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
+            handoffComponents.queryItems = [
+                URLQueryItem(name: "access_token", value: accessToken),
+                URLQueryItem(name: "refresh_token", value: refreshToken)
+            ]
+            
+            if let handoffURL = handoffComponents.url {
+                print("📱 Posting navigateToURL notification with URL: \(handoffURL)")
+                NotificationCenter.default.post(
+                    name: .navigateToURL,
+                    object: nil,
+                    userInfo: ["url": handoffURL]
+                )
+            } else {
+                print("📱 Failed to create handoff URL")
+            }
+        }
     }
     
     private func exchangeCodeForTokens(code: String) {
@@ -322,33 +375,48 @@ class SupabaseManager: NSObject, ObservableObject {
                             // Save tokens to Keychain for persistence
                             self?.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
                             
-                            // Store tokens and mark as authenticated
-                            self?.isAuthenticated = true
-                            self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
-                            print("📱 Token exchange successful, user authenticated")
-                            
-                            // Navigate to native handoff endpoint with tokens
-                            var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
-                            handoffComponents.queryItems = [
-                                URLQueryItem(name: "access_token", value: accessToken),
-                                URLQueryItem(name: "refresh_token", value: refreshToken)
-                            ]
-                            
-                            if let handoffURL = handoffComponents.url {
-                                NotificationCenter.default.post(
-                                    name: .navigateToURL,
-                                    object: nil,
-                                    userInfo: ["url": handoffURL]
-                                )
+                            // Store tokens and mark as authenticated on main thread
+                            DispatchQueue.main.async {
+                                self?.isAuthenticated = true
+                                self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+                                print("📱 Token exchange successful, user authenticated")
+                                print("📱 isAuthenticated set to: \(self?.isAuthenticated ?? false)")
+                                
+                                // Force UI update
+                                self?.objectWillChange.send()
+                                
+                                // Navigate to native-handoff to set up web app session, then redirect to dashboard
+                                var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
+                                handoffComponents.queryItems = [
+                                    URLQueryItem(name: "access_token", value: accessToken),
+                                    URLQueryItem(name: "refresh_token", value: refreshToken)
+                                ]
+                                
+                                if let handoffURL = handoffComponents.url {
+                                    print("📱 Posting navigateToURL notification with URL: \(handoffURL)")
+                                    NotificationCenter.default.post(
+                                        name: .navigateToURL,
+                                        object: nil,
+                                        userInfo: ["url": handoffURL]
+                                    )
+                                } else {
+                                    print("📱 Failed to create handoff URL")
+                                }
                             }
                         } else if let error = json["error"] as? String {
-                            self?.errorMessage = "Token exchange error: \(error)"
+                            DispatchQueue.main.async {
+                                self?.errorMessage = "Token exchange error: \(error)"
+                            }
                         } else {
-                            self?.errorMessage = "Invalid token response"
+                            DispatchQueue.main.async {
+                                self?.errorMessage = "Invalid token response"
+                            }
                         }
                     }
                 } catch {
-                    self?.errorMessage = "Failed to parse token response"
+                    DispatchQueue.main.async {
+                        self?.errorMessage = "Failed to parse token response"
+                    } 
                 }
             }
         }.resume()
@@ -360,13 +428,23 @@ class SupabaseManager: NSObject, ObservableObject {
         clearStoredTokens()
         
         // Clear authentication state
-        isAuthenticated = false
-        currentUser = nil
-        errorMessage = nil
+        DispatchQueue.main.async {
+            self.isAuthenticated = false
+            self.currentUser = nil
+            self.errorMessage = nil
+        }
         
         // No need to navigate to URL - ContentView will automatically show AuthView
         // when isAuthenticated becomes false
         print("📱 User signed out, tokens cleared, returning to native AuthView")
+    }
+    
+    // Manual method to force authentication state update (for debugging)
+    func forceAuthenticationUpdate() {
+        DispatchQueue.main.async {
+            print("📱 Forcing authentication state update")
+            self.objectWillChange.send()
+        }
     }
 }
 
