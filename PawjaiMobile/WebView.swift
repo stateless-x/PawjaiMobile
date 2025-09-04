@@ -195,26 +195,7 @@ struct WebViewContainer: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(.systemBackground))
             }
-            
-            // Sign out button (top-right corner)
-            VStack {
-                HStack {
-                    Spacer()
-                    Button(action: {
-                        supabaseManager.signOut()
-                    }) {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 44, height: 44)
-                            .background(Color.red)
-                            .clipShape(Circle())
-                    }
-                    .padding(.trailing, 16)
-                    .padding(.top, 16)
-                }
-                Spacer()
-            }
+
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToURL)) { notification in
             if let url = notification.userInfo?["url"] as? URL {
