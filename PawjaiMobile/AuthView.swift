@@ -73,6 +73,9 @@ struct AuthView: View {
                                 // Google Sign In Button
                                 GoogleSignInButton(authMode: authMode)
                                 
+                                // Apple Sign In Button
+                                AppleSignInButton(authMode: authMode)
+                                
                                 // OR separator
                                 OrSeparator()
                                 
@@ -366,6 +369,32 @@ struct GoogleSignInButton: View {
     }
 }
 
+// Apple Sign In Button
+struct AppleSignInButton: View {
+    @StateObject private var supabaseManager = SupabaseManager.shared
+    let authMode: AuthView.AuthModeType
+    
+    var body: some View {
+        Button(action: {
+            supabaseManager.signInWithApple()
+        }) {
+            HStack(spacing: 12) {
+                // Apple logo
+                AppleLogo()
+                
+                Text(authMode == .signin ? "เข้าสู่ระบบด้วย Apple" : "สมัครด้วย Apple")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 48)
+            .background(Color.black)
+            .cornerRadius(12)
+        }
+        .disabled(supabaseManager.isLoading)
+    }
+}
+
 // Google Logo Component
 struct GoogleLogo: View {
     var body: some View {
@@ -373,6 +402,15 @@ struct GoogleLogo: View {
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: 20, height: 20)
+    }
+}
+
+// Apple Logo Component
+struct AppleLogo: View {
+    var body: some View {
+        Image(systemName: "applelogo")
+            .font(.system(size: 20, weight: .medium))
+            .foregroundColor(.white)
     }
 }
 

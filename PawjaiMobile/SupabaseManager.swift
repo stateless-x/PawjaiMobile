@@ -158,7 +158,7 @@ class SupabaseManager: NSObject, ObservableObject {
         errorMessage = nil
         
         // Create the OAuth URL for Google
-        let oauthURL = createGoogleOAuthURL()
+        let oauthURL = createOAuthURL(provider: "google")
         
         // Start the authentication session
         let session = ASWebAuthenticationSession(
@@ -193,20 +193,62 @@ class SupabaseManager: NSObject, ObservableObject {
         session.start()
     }
     
-    private func createGoogleOAuthURL() -> URL {
+    func signInWithApple() {
+        isLoading = true
+        errorMessage = nil
+        
+        // Create the OAuth URL for Apple
+        let oauthURL = createOAuthURL(provider: "apple")
+        
+        // Start the authentication session
+        let session = ASWebAuthenticationSession(
+            url: oauthURL,
+            callbackURLScheme: "pawjai"
+        ) { [weak self] callbackURL, error in
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                
+                print("📱 Apple OAuth callback received")
+                print("📱 Callback URL: \(callbackURL?.absoluteString ?? "nil")")
+                print("📱 Error: \(error?.localizedDescription ?? "nil")")
+                
+                if let error = error {
+                    print("📱 Apple OAuth error: \(error.localizedDescription)")
+                    self?.errorMessage = error.localizedDescription
+                    return
+                }
+                
+                guard let callbackURL = callbackURL else {
+                    print("📱 No callback URL received")
+                    self?.errorMessage = "No callback URL received"
+                    return
+                }
+                
+                print("📱 Processing Apple OAuth callback: \(callbackURL)")
+                self?.handleOAuthCallback(url: callbackURL)
+            }
+        }
+        
+        session.presentationContextProvider = self
+        session.start()
+    }
+    
+    private func createOAuthURL(provider: String) -> URL {
         // Create the Supabase OAuth URL directly
         var components = URLComponents(string: "\(Configuration.supabaseURL)/auth/v1/authorize")!
         
-        components.queryItems = [
-            URLQueryItem(name: "provider", value: "google"),
+        var queryItems = [
+            URLQueryItem(name: "provider", value: provider),
             URLQueryItem(name: "redirect_to", value: Configuration.redirectURL),
             URLQueryItem(name: "response_type", value: "code"),
             URLQueryItem(name: "access_type", value: "offline"),
             URLQueryItem(name: "prompt", value: "consent")
         ]
         
+        components.queryItems = queryItems
+        
         let oauthURL = components.url!
-        print("🔗 OAuth URL: \(oauthURL)")
+        print("🔗 \(provider.capitalized) OAuth URL: \(oauthURL)")
         print("🔗 Redirect URL: \(Configuration.redirectURL)")
         print("🔗 Supabase URL: \(Configuration.supabaseURL)")
         print("🔗 Web App URL: \(Configuration.webAppURL)")
