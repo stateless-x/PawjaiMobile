@@ -7,6 +7,8 @@
 
 import SwiftUI
 import WebKit
+import AVFoundation
+import Photos
 
 struct WebView: UIViewRepresentable {
     let url: URL
@@ -14,7 +16,17 @@ struct WebView: UIViewRepresentable {
     @Binding var errorMessage: String?
     
     func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView()
+        let configuration = WKWebViewConfiguration()
+        
+        // Enable camera and microphone permissions
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        
+        // Allow camera and microphone access
+        configuration.preferences.javaScriptEnabled = true
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+        
+        let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.bounces = false
@@ -136,6 +148,107 @@ struct WebView: UIViewRepresentable {
             
             // Allow all other navigation actions
             decisionHandler(.allow)
+        }
+        
+        // Handle camera and microphone permission requests
+        func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+            print("📱 Camera/Microphone permission requested for: \(origin.host)")
+            
+            // Request system permissions first
+            switch type {
+            case .camera:
+                print("📱 Camera permission requested")
+                requestCameraPermission { granted in
+                    DispatchQueue.main.async {
+                        decisionHandler(granted ? .grant : .deny)
+                    }
+                }
+            case .microphone:
+                print("📱 Microphone permission requested")
+                requestMicrophonePermission { granted in
+                    DispatchQueue.main.async {
+                        decisionHandler(granted ? .grant : .deny)
+                    }
+                }
+            case .cameraAndMicrophone:
+                print("📱 Camera and microphone permission requested")
+                requestCameraAndMicrophonePermission { granted in
+                    DispatchQueue.main.async {
+                        decisionHandler(granted ? .grant : .deny)
+                    }
+                }
+            @unknown default:
+                print("📱 Unknown media capture type requested")
+                decisionHandler(.deny)
+            }
+        }
+        
+        // Request camera permission from system
+        private func requestCameraPermission(completion: @escaping (Bool) -> Void) {
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                print("📱 Camera permission result: \(granted)")
+                completion(granted)
+            }
+        }
+        
+        // Request microphone permission from system
+        private func requestMicrophonePermission(completion: @escaping (Bool) -> Void) {
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                print("📱 Microphone permission result: \(granted)")
+                completion(granted)
+            }
+        }
+        
+        // Request both camera and microphone permissions
+        private func requestCameraAndMicrophonePermission(completion: @escaping (Bool) -> Void) {
+            let group = DispatchGroup()
+            var cameraGranted = false
+            var microphoneGranted = false
+            
+            group.enter()
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                cameraGranted = granted
+                print("📱 Camera permission result: \(granted)")
+                group.leave()
+            }
+            
+            group.enter()
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                microphoneGranted = granted
+                print("📱 Microphone permission result: \(granted)")
+                group.leave()
+            }
+            
+            group.notify(queue: .main) {
+                let bothGranted = cameraGranted && microphoneGranted
+                print("📱 Both permissions result: \(bothGranted)")
+                completion(bothGranted)
+            }
+        }
+        
+        // Request photo library permission
+        private func requestPhotoLibraryPermission(completion: @escaping (Bool) -> Void) {
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
+                let granted = status == .authorized || status == .limited
+                print("📱 Photo library permission result: \(granted) (status: \(status.rawValue))")
+                completion(granted)
+            }
+        }
+        
+        // Check current permission status
+        private func checkCameraPermission() -> Bool {
+            let status = AVCaptureDevice.authorizationStatus(for: .video)
+            return status == .authorized
+        }
+        
+        private func checkMicrophonePermission() -> Bool {
+            let status = AVCaptureDevice.authorizationStatus(for: .audio)
+            return status == .authorized
+        }
+        
+        private func checkPhotoLibraryPermission() -> Bool {
+            let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            return status == .authorized || status == .limited
         }
     }
 }

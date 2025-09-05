@@ -10,22 +10,9 @@
 		1D1C6ACF2E6858F700668059 /* PawjaiMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PawjaiMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		1DE1FED32E6AFD0B00A1B1C6 /* Exceptions for "PawjaiMobile" folder in "PawjaiMobile" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 1D1C6ACE2E6858F700668059 /* PawjaiMobile */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		1D1C6AD12E6858F700668059 /* PawjaiMobile */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				1DE1FED32E6AFD0B00A1B1C6 /* Exceptions for "PawjaiMobile" folder in "PawjaiMobile" target */,
-			);
 			path = PawjaiMobile;
 			sourceTree = "<group>";
 		};
@@ -270,14 +257,10 @@
 				DEVELOPMENT_TEAM = G72RH86NX3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = PawjaiMobile/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Pawjai;
 				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLName = \"pawjai-auth\";\n    CFBundleURLSchemes =     (\n        pawjai\n    );\n}";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoadsInWebContent = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Pawjai uses the camera to let you take photos of your pets.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Pawjai uses the microphone when recording video or sound.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Pawjai needs access to your photo library so you can upload pet images.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -308,14 +291,10 @@
 				DEVELOPMENT_TEAM = G72RH86NX3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = PawjaiMobile/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Pawjai;
 				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLName = \"pawjai-auth\";\n    CFBundleURLSchemes =     (\n        pawjai\n    );\n}";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoadsInWebContent = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Pawjai uses the camera to let you take photos of your pets.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Pawjai uses the microphone when recording video or sound.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Pawjai needs access to your photo library so you can upload pet images.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
