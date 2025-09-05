@@ -776,6 +776,65 @@ class SupabaseManager: NSObject, ObservableObject {
         }.resume()
     }
     
+    func resetPassword(email: String, completion: @escaping (Bool, String?) -> Void) {
+        print("📱 Starting password reset for: \(email)")
+        
+        // Create the password reset request
+        var urlComponents = URLComponents(string: "\(Configuration.supabaseURL)/auth/v1/recover")!
+        urlComponents.queryItems = [
+            URLQueryItem(name: "apikey", value: Configuration.supabaseAnonKey)
+        ]
+        
+        var request = URLRequest(url: urlComponents.url!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        
+        let body: [String: Any] = [
+            "email": email,
+            "options": [
+                "emailRedirectTo": "\(Configuration.webAppURL)/auth/reset-password"
+            ]
+        ]
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            DispatchQueue.main.async {
+                completion(false, "Failed to create request body")
+            }
+            return
+        }
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("📱 Password reset error: \(error.localizedDescription)")
+                    completion(false, error.localizedDescription)
+                    return
+                }
+                
+                // Check HTTP status code
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("📱 Password reset HTTP Status Code: \(httpResponse.statusCode)")
+                    if httpResponse.statusCode == 200 {
+                        print("📱 Password reset email sent successfully")
+                        completion(true, nil)
+                        return
+                    } else if httpResponse.statusCode != 200 {
+                        print("📱 Password reset HTTP Error: \(httpResponse.statusCode)")
+                        if let data = data, let errorString = String(data: data, encoding: .utf8) {
+                            print("📱 Password reset error response: \(errorString)")
+                        }
+                    }
+                }
+                
+                // If we get here, it was successful
+                completion(true, nil)
+            }
+        }.resume()
+    }
+    
     func signOut() {
         // Clear stored tokens from Keychain
         clearStoredTokens()
