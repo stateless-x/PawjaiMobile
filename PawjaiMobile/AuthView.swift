@@ -53,12 +53,12 @@ struct AuthView: View {
                         // Title and subtitle
                         VStack(spacing: 8) {
                             Text(getTitle())
-                                .font(.system(size: 24, weight: .semibold))
+                                .font(.kanitBold(size: 24))
                                 .foregroundColor(.black)
                                 .multilineTextAlignment(.center)
                             
                             Text(getSubtitle())
-                                .font(.system(size: 18))
+                                .font(.kanitRegular(size: 18))
                                 .foregroundColor(.black.opacity(0.7))
                                 .multilineTextAlignment(.center)
                         }
@@ -91,7 +91,7 @@ struct AuthView: View {
                                         Image(systemName: "envelope")
                                             .font(.system(size: 16))
                                         Text("ใช้อีเมลและรหัสผ่าน")
-                                            .font(.system(size: 14, weight: .medium))
+                                            .font(.kanitMedium(size: 14))
                                     }
                                     .foregroundColor(.black.opacity(0.6))
                                 }
@@ -99,7 +99,7 @@ struct AuthView: View {
                                 // Toggle between Sign In/Sign Up
                                 HStack(spacing: 4) {
                                     Text(authMode == .signin ? "ยังไม่มีบัญชี?" : "มีบัญชีอยู่แล้ว?")
-                                        .font(.system(size: 14))
+                                        .font(.kanitRegular(size: 14))
                                         .foregroundColor(.black.opacity(0.6))
                                     
                                     Button(authMode == .signin ? "สมัครสมาชิก" : "เข้าสู่ระบบ") {
@@ -109,7 +109,7 @@ struct AuthView: View {
                                             passwordError = ""
                                         }
                                     }
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.kanitMedium(size: 14))
                                     .foregroundColor(Color(red: 1.0, green: 0.541, blue: 0.239)) // brand-orange
                                 }
                             }
@@ -119,70 +119,108 @@ struct AuthView: View {
                                 // Email field
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("อีเมล")
-                                        .font(.system(size: 14, weight: .medium))
+                                        .font(.kanitMedium(size: 14))
                                         .foregroundColor(.black)
                                     
-                                    TextField("doggo@pawjai.com", text: $email)
-                                        .textFieldStyle(CustomTextFieldStyle())
-                                        .keyboardType(.emailAddress)
-                                        .autocapitalization(.none)
-                                        .disabled(supabaseManager.isLoading)
+                                    ZStack(alignment: .leading) {
+                                        TextField("", text: $email)
+                                            .textFieldStyle(CustomTextFieldStyle())
+                                            .keyboardType(.emailAddress)
+                                            .autocapitalization(.none)
+                                            .disabled(supabaseManager.isLoading)
+                                            .foregroundColor(.black)
+                                        
+                                        if email.isEmpty {
+                                            Text("doggo@pawjai.com")
+                                                .font(.kanitRegular(size: 16))
+                                                .foregroundColor(Color.gray.opacity(0.8))
+                                                .padding(.horizontal, 16)
+                                                .padding(.vertical, 12)
+                                                .allowsHitTesting(false)
+                                        }
+                                    }
                                 }
                                 
                                 // Password field
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("รหัสผ่าน")
-                                        .font(.system(size: 14, weight: .medium))
+                                        .font(.kanitMedium(size: 14))
                                         .foregroundColor(.black)
                                     
-                                    HStack {
-                                        if showPassword {
-                                            TextField(authMode == .signup ? "สร้างรหัสผ่านที่ปลอดภัย" : "ใส่รหัสผ่าน", text: $password)
-                                        } else {
-                                            SecureField(authMode == .signup ? "สร้างรหัสผ่านที่ปลอดภัย" : "ใส่รหัสผ่าน", text: $password)
+                                    ZStack(alignment: .leading) {
+                                        HStack {
+                                            if showPassword {
+                                                TextField("", text: $password)
+                                                    .foregroundColor(.black)
+                                            } else {
+                                                SecureField("", text: $password)
+                                                    .foregroundColor(.black)
+                                            }
+                                            
+                                            Button(action: {
+                                                showPassword.toggle()
+                                            }) {
+                                                Image(systemName: showPassword ? "eye.slash" : "eye")
+                                                    .foregroundColor(.black.opacity(0.6))
+                                            }
                                         }
+                                        .textFieldStyle(CustomTextFieldStyle())
+                                        .disabled(supabaseManager.isLoading)
                                         
-                                        Button(action: {
-                                            showPassword.toggle()
-                                        }) {
-                                            Image(systemName: showPassword ? "eye.slash" : "eye")
-                                                .foregroundColor(.black.opacity(0.6))
+                                        if password.isEmpty {
+                                            Text(authMode == .signup ? "สร้างรหัสผ่านที่ปลอดภัย" : "ใส่รหัสผ่าน")
+                                                .font(.kanitRegular(size: 16))
+                                                .foregroundColor(Color.gray.opacity(0.8))
+                                                .padding(.horizontal, 16)
+                                                .padding(.vertical, 12)
+                                                .allowsHitTesting(false)
                                         }
                                     }
-                                    .textFieldStyle(CustomTextFieldStyle())
-                                    .disabled(supabaseManager.isLoading)
                                 }
                                 
                                 // Confirm Password field (only for signup)
                                 if authMode == .signup {
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text("ยืนยันรหัสผ่าน")
-                                            .font(.system(size: 14, weight: .medium))
+                                            .font(.kanitMedium(size: 14))
                                             .foregroundColor(.black)
                                         
-                                        HStack {
-                                            if showConfirmPassword {
-                                                TextField("ยืนยันรหัสผ่าน", text: $confirmPassword)
-                                            } else {
-                                                SecureField("ยืนยันรหัสผ่าน", text: $confirmPassword)
+                                        ZStack(alignment: .leading) {
+                                            HStack {
+                                                if showConfirmPassword {
+                                                    TextField("", text: $confirmPassword)
+                                                        .foregroundColor(.black)
+                                                } else {
+                                                    SecureField("", text: $confirmPassword)
+                                                        .foregroundColor(.black)
+                                                }
+                                                
+                                                Button(action: {
+                                                    showConfirmPassword.toggle()
+                                                }) {
+                                                    Image(systemName: showConfirmPassword ? "eye.slash" : "eye")
+                                                        .foregroundColor(.black.opacity(0.6))
+                                                }
                                             }
+                                            .textFieldStyle(CustomTextFieldStyle())
+                                            .disabled(supabaseManager.isLoading)
                                             
-                                            Button(action: {
-                                                showConfirmPassword.toggle()
-                                            }) {
-                                                Image(systemName: showConfirmPassword ? "eye.slash" : "eye")
-                                                    .foregroundColor(.black.opacity(0.6))
+                                            if confirmPassword.isEmpty {
+                                                Text("ยืนยันรหัสผ่าน")
+                                                    .font(.kanitRegular(size: 16))
+                                                    .foregroundColor(Color.gray.opacity(0.8))
+                                                    .padding(.horizontal, 16)
+                                                    .padding(.vertical, 12)
+                                                    .allowsHitTesting(false)
                                             }
                                         }
-                                        .textFieldStyle(CustomTextFieldStyle())
-                                        .disabled(supabaseManager.isLoading)
                                     }
                                 }
                                 
                                 // Password error message
                                 if !passwordError.isEmpty {
                                     Text(passwordError)
-                                        .font(.system(size: 14))
+                                        .font(.kanitRegular(size: 14))
                                         .foregroundColor(.red)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 8)
@@ -193,7 +231,7 @@ struct AuthView: View {
                                 // General error message
                                 if !signInError.isEmpty {
                                     Text(signInError)
-                                        .font(.system(size: 14))
+                                        .font(.kanitRegular(size: 14))
                                         .foregroundColor(.red)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 8)
@@ -208,7 +246,7 @@ struct AuthView: View {
                                         Button("ลืมรหัสผ่าน?") {
                                             // TODO: Navigate to forgot password
                                         }
-                                        .font(.system(size: 14, weight: .medium))
+                                        .font(.kanitMedium(size: 14))
                                         .foregroundColor(Color(red: 1.0, green: 0.541, blue: 0.239)) // brand-orange
                                     }
                                 }
@@ -224,7 +262,7 @@ struct AuthView: View {
                                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                         }
                                         Text(authMode == .signin ? "เข้าสู่ระบบ" : "เริ่มต้นดูแลน้องให้ดียิ่งขึ้น")
-                                            .font(.system(size: 16, weight: .medium))
+                                            .font(.kanitMedium(size: 16))
                                     }
                                     .foregroundColor(.white)
                                     .frame(maxWidth: .infinity)
@@ -243,14 +281,14 @@ struct AuthView: View {
                                     }
                                 }) {
                                     Text("กลับไปใช้ OAuth")
-                                        .font(.system(size: 14, weight: .medium))
+                                        .font(.kanitMedium(size: 14))
                                         .foregroundColor(.black.opacity(0.6))
                                 }
                                 
                                 // Toggle between Sign In/Sign Up
                                 HStack(spacing: 4) {
                                     Text(authMode == .signin ? "ยังไม่มีบัญชี?" : "มีบัญชีอยู่แล้ว?")
-                                        .font(.system(size: 14))
+                                        .font(.kanitRegular(size: 14))
                                         .foregroundColor(.black.opacity(0.6))
                                     
                                     Button(authMode == .signin ? "สมัครสมาชิก" : "เข้าสู่ระบบ") {
@@ -260,7 +298,7 @@ struct AuthView: View {
                                             passwordError = ""
                                         }
                                     }
-                                    .font(.system(size: 14, weight: .medium))
+                                    .font(.kanitMedium(size: 14))
                                     .foregroundColor(Color(red: 1.0, green: 0.541, blue: 0.239)) // brand-orange
                                 }
                             }
@@ -331,11 +369,32 @@ struct CustomTextFieldStyle: TextFieldStyle {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(Color.white)
+            .foregroundColor(.black) // Ensure text is dark/black
+            .accentColor(.black) // Cursor color
             .cornerRadius(12)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(Color.gray.opacity(0.3), lineWidth: 1)
             )
+    }
+}
+
+// Custom placeholder modifier
+struct PlaceholderStyle: ViewModifier {
+    var showPlaceholder: Bool
+    var placeholder: String
+    
+    func body(content: Content) -> some View {
+        ZStack(alignment: .leading) {
+            if showPlaceholder {
+                Text(placeholder)
+                    .font(.kanitRegular(size: 16))
+                    .foregroundColor(.gray.opacity(0.8))
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+            }
+            content
+        }
     }
 }
 
@@ -353,7 +412,7 @@ struct GoogleSignInButton: View {
                 GoogleLogo()
                 
                 Text(authMode == .signin ? "เข้าสู่ระบบด้วย Google" : "สมัครด้วย Google")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.kanitMedium(size: 16))
                     .foregroundColor(.black)
             }
             .frame(maxWidth: .infinity)
@@ -383,7 +442,7 @@ struct AppleSignInButton: View {
                 AppleLogo()
                 
                 Text(authMode == .signin ? "เข้าสู่ระบบด้วย Apple" : "สมัครด้วย Apple")
-                    .font(.system(size: 16, weight: .medium))
+                    .font(.kanitMedium(size: 16))
                     .foregroundColor(.white)
             }
             .frame(maxWidth: .infinity)
@@ -423,8 +482,8 @@ struct OrSeparator: View {
                 .frame(height: 1)
             
             Text("หรือ")
-                .font(.system(size: 14))
-                .foregroundColor(.secondary)
+                .font(.kanitRegular(size: 14))
+                .foregroundColor(.black.opacity(0.6))
                 .padding(.horizontal, 16)
                 .background(Color.white)
             
