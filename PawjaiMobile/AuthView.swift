@@ -33,6 +33,11 @@ struct AuthView: View {
             // Solid background color
             Color(red: 1.0, green: 0.957, blue: 0.914) // #fff4e9
                 .ignoresSafeArea()
+                .onAppear {
+                    print("🔐 AuthView appeared")
+                    print("🔐 SupabaseManager isLoading: \(supabaseManager.isLoading)")
+                    print("🔐 SupabaseManager isAuthenticated: \(supabaseManager.isAuthenticated)")
+                }
             
             ScrollView {
                 VStack(spacing: 0) {

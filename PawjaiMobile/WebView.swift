@@ -26,10 +26,17 @@ struct WebView: UIViewRepresentable {
         configuration.preferences.javaScriptEnabled = true
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         
+        // Enable file uploads and camera capture
+        configuration.allowsAirPlayForMediaPlayback = true
+        configuration.allowsPictureInPictureMediaPlayback = true
+        
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.bounces = false
+        
+        // Enable file uploads
+        webView.configuration.userContentController.add(context.coordinator, name: "fileUpload")
         
         // Add message handler for sign-out
         webView.configuration.userContentController.add(context.coordinator, name: "signOut")
@@ -58,7 +65,6 @@ struct WebView: UIViewRepresentable {
         
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             if message.name == "signOut" {
-                print("📱 Received sign-out message from WebView")
                 DispatchQueue.main.async {
                     SupabaseManager.shared.signOut()
                 }
@@ -79,19 +85,15 @@ struct WebView: UIViewRepresentable {
                 // Check if the loaded page is a signin/signup page
                 if let url = webView.url {
                     let path = url.path
-                    print("📱 WebView finished loading: \(url.absoluteString)")
-                    print("📱 WebView path: \(path)")
-                    
+
+                
                     // Only redirect to AuthView if we're actually on a signin/signup page
                     // or if we're on the home page (which happens after sign-out)
                     // and not on a redirect or callback page
                     if ((path.contains("/auth/signin") || path.contains("/auth/signup") || path == "/") && 
                        !path.contains("/auth/callback") && 
                        !path.contains("/auth/native-handoff")) {
-                        print("🚫 WebView loaded signin/signup/home page, redirecting to native AuthView")
                         SupabaseManager.shared.isAuthenticated = false
-                    } else {
-                        print("📱 WebView loaded valid page, staying in WebView")
                     }
                 }
             }
@@ -113,7 +115,6 @@ struct WebView: UIViewRepresentable {
             // Handle custom URL schemes
             if url.scheme == "pawjai" {
                 if url.host == "signout" {
-                    print("📱 Received pawjai://signout URL, triggering native sign-out")
                     DispatchQueue.main.async {
                         SupabaseManager.shared.signOut()
                     }
@@ -124,16 +125,12 @@ struct WebView: UIViewRepresentable {
             
             // Check if the web app is trying to redirect to signin/signup pages
             let path = url.path
-            print("📱 WebView navigation decision for: \(url.absoluteString)")
-            print("📱 WebView navigation path: \(path)")
-            
             // Only redirect to AuthView if we're actually navigating to a signin/signup page
             // or to the home page (which happens after sign-out)
             // and not to a redirect or callback page
             if ((path.contains("/auth/signin") || path.contains("/auth/signup") || path == "/") && 
                !path.contains("/auth/callback") && 
                !path.contains("/auth/native-handoff")) {
-                print("🚫 WebView trying to navigate to signin/signup/home, redirecting to native AuthView")
                 
                 // Redirect to native AuthView by setting authentication to false
                 DispatchQueue.main.async {
@@ -142,8 +139,6 @@ struct WebView: UIViewRepresentable {
                 
                 decisionHandler(.cancel)
                 return
-            } else {
-                print("📱 WebView navigation allowed for: \(path)")
             }
             
             // Allow all other navigation actions
@@ -152,33 +147,28 @@ struct WebView: UIViewRepresentable {
         
         // Handle camera and microphone permission requests
         func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedBy frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-            print("📱 Camera/Microphone permission requested for: \(origin.host)")
             
             // Request system permissions first
             switch type {
             case .camera:
-                print("📱 Camera permission requested")
                 requestCameraPermission { granted in
                     DispatchQueue.main.async {
                         decisionHandler(granted ? .grant : .deny)
                     }
                 }
             case .microphone:
-                print("📱 Microphone permission requested")
                 requestMicrophonePermission { granted in
                     DispatchQueue.main.async {
                         decisionHandler(granted ? .grant : .deny)
                     }
                 }
             case .cameraAndMicrophone:
-                print("📱 Camera and microphone permission requested")
                 requestCameraAndMicrophonePermission { granted in
                     DispatchQueue.main.async {
                         decisionHandler(granted ? .grant : .deny)
                     }
                 }
             @unknown default:
-                print("📱 Unknown media capture type requested")
                 decisionHandler(.deny)
             }
         }
@@ -186,7 +176,6 @@ struct WebView: UIViewRepresentable {
         // Request camera permission from system
         private func requestCameraPermission(completion: @escaping (Bool) -> Void) {
             AVCaptureDevice.requestAccess(for: .video) { granted in
-                print("📱 Camera permission result: \(granted)")
                 completion(granted)
             }
         }
@@ -194,7 +183,6 @@ struct WebView: UIViewRepresentable {
         // Request microphone permission from system
         private func requestMicrophonePermission(completion: @escaping (Bool) -> Void) {
             AVCaptureDevice.requestAccess(for: .audio) { granted in
-                print("📱 Microphone permission result: \(granted)")
                 completion(granted)
             }
         }
@@ -208,20 +196,17 @@ struct WebView: UIViewRepresentable {
             group.enter()
             AVCaptureDevice.requestAccess(for: .video) { granted in
                 cameraGranted = granted
-                print("📱 Camera permission result: \(granted)")
                 group.leave()
             }
             
             group.enter()
             AVCaptureDevice.requestAccess(for: .audio) { granted in
                 microphoneGranted = granted
-                print("📱 Microphone permission result: \(granted)")
                 group.leave()
             }
             
             group.notify(queue: .main) {
                 let bothGranted = cameraGranted && microphoneGranted
-                print("📱 Both permissions result: \(bothGranted)")
                 completion(bothGranted)
             }
         }
@@ -230,7 +215,6 @@ struct WebView: UIViewRepresentable {
         private func requestPhotoLibraryPermission(completion: @escaping (Bool) -> Void) {
             PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
                 let granted = status == .authorized || status == .limited
-                print("📱 Photo library permission result: \(granted) (status: \(status.rawValue))")
                 completion(granted)
             }
         }

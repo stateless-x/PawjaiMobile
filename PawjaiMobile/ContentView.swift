@@ -19,6 +19,11 @@ struct ContentView: View {
                 AuthView()
             }
         }
+        .onAppear {
+            print("📱 ContentView body appeared")
+            print("📱 SupabaseManager isAuthenticated: \(supabaseManager.isAuthenticated)")
+            print("📱 WebViewURL: \(webViewURL?.absoluteString ?? "nil")")
+        }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToURL)) { notification in
             if let url = notification.userInfo?["url"] as? URL {
                 print("📱 ContentView received navigateToURL notification: \(url)")

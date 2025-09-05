@@ -22,18 +22,28 @@ class SupabaseManager: NSObject, ObservableObject {
     private let redirectURL: String
     
     private override init() {
+        print("🔐 SupabaseManager initializing...")
         self.supabaseURL = URL(string: Configuration.supabaseURL)!
         self.supabaseAnonKey = Configuration.supabaseAnonKey
         self.redirectURL = Configuration.redirectURL
         super.init()
         
+        print("🔐 SupabaseManager configuration loaded:")
+        print("🔐 Supabase URL: \(Configuration.supabaseURL)")
+        print("🔐 Redirect URL: \(Configuration.redirectURL)")
+        print("🔐 Web App URL: \(Configuration.webAppURL)")
+        
         // Check for existing authentication state
         checkAuthenticationState()
+        print("🔐 SupabaseManager initialization complete")
     }
     
     private func checkAuthenticationState() {
+        print("🔐 Checking authentication state...")
+        
         // Check for stored authentication tokens
         if let storedUser = loadStoredUser() {
+            print("🔐 Found stored user, checking token validity...")
             // Check if tokens are still valid (not expired)
             if isTokenValid(user: storedUser) {
                 self.currentUser = storedUser
@@ -63,6 +73,8 @@ class SupabaseManager: NSObject, ObservableObject {
             self.currentUser = nil
             print("📱 No stored authentication found, showing AuthView")
         }
+        
+        print("🔐 Authentication state check complete - isAuthenticated: \(self.isAuthenticated)")
     }
     
     // MARK: - Keychain Storage Methods
