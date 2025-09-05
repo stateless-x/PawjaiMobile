@@ -16,6 +16,8 @@ class SupabaseManager: NSObject, ObservableObject {
     @Published var currentUser: User?
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var requiresEmailConfirmation = false
+    @Published var pendingEmailConfirmation: String?
     
     private let supabaseURL: URL
     private let supabaseAnonKey: String
@@ -476,6 +478,303 @@ class SupabaseManager: NSObject, ObservableObject {
         }.resume()
     }
     
+    
+    // MARK: - Email/Password Authentication Methods
+    
+    func signInWithEmail(email: String, password: String) {
+        isLoading = true
+        errorMessage = nil
+        
+        print("📱 Starting email sign in for: \(email)")
+        
+        // Create the sign in request using the correct Supabase Auth API format
+        var urlComponents = URLComponents(string: "\(Configuration.supabaseURL)/auth/v1/token")!
+        urlComponents.queryItems = [
+            URLQueryItem(name: "grant_type", value: "password"),
+            URLQueryItem(name: "apikey", value: Configuration.supabaseAnonKey)
+        ]
+        
+        var request = URLRequest(url: urlComponents.url!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        
+        let body = [
+            "email": email,
+            "password": password
+        ]
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            DispatchQueue.main.async {
+                self.isLoading = false
+                self.errorMessage = "Failed to create request body"
+            }
+            return
+        }
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                
+                if let error = error {
+                    print("📱 Email sign in error: \(error.localizedDescription)")
+                    self?.errorMessage = error.localizedDescription
+                    return
+                }
+                
+                // Check HTTP status code
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("📱 HTTP Status Code: \(httpResponse.statusCode)")
+                    if httpResponse.statusCode != 200 {
+                        print("📱 HTTP Error: \(httpResponse.statusCode)")
+                        if let data = data, let errorString = String(data: data, encoding: .utf8) {
+                            print("📱 Error response: \(errorString)")
+                        }
+                    }
+                }
+                
+                guard let data = data else {
+                    print("📱 No data received from email sign in")
+                    self?.errorMessage = "No data received"
+                    return
+                }
+                
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        print("📱 Email sign in response: \(json)")
+                        print("📱 Response keys: \(Array(json.keys))")
+                        
+                        // Check for different possible response structures
+                        if let accessToken = json["access_token"] as? String,
+                           let refreshToken = json["refresh_token"] as? String {
+                            
+                            print("📱 Email sign in successful, tokens received")
+                            
+                            // Save tokens to Keychain for persistence
+                            self?.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
+                            
+                            // Store tokens and mark as authenticated
+                            self?.isAuthenticated = true
+                            self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+                            print("📱 Email sign in authentication successful")
+                            print("📱 isAuthenticated set to: \(self?.isAuthenticated ?? false)")
+                            
+                            // Force UI update
+                            self?.objectWillChange.send()
+                            
+                            // Navigate to native-handoff to set up web app session, then redirect to dashboard
+                            var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
+                            handoffComponents.queryItems = [
+                                URLQueryItem(name: "access_token", value: accessToken),
+                                URLQueryItem(name: "refresh_token", value: refreshToken)
+                            ]
+                            
+                            if let handoffURL = handoffComponents.url {
+                                print("📱 Posting navigateToURL notification with URL: \(handoffURL)")
+                                NotificationCenter.default.post(
+                                    name: .navigateToURL,
+                                    object: nil,
+                                    userInfo: ["url": handoffURL]
+                                )
+                            } else {
+                                print("📱 Failed to create handoff URL")
+                            }
+                            
+                        } else if let error = json["error"] as? String {
+                            // Check if error is due to unconfirmed email
+                            if error.contains("Email not confirmed") || error.contains("email_confirmed_at") {
+                                print("📱 Email sign in requires email confirmation")
+                                self?.requiresEmailConfirmation = true
+                                self?.pendingEmailConfirmation = email
+                            } else {
+                                print("📱 Email sign in error from server: \(error)")
+                                self?.errorMessage = error
+                            }
+                        } else if let msg = json["msg"] as? String {
+                            // Handle Supabase error format with 'msg' field
+                            print("📱 Email sign in error from server: \(msg)")
+                            self?.errorMessage = msg
+                        } else if let errorCode = json["error_code"] as? String {
+                            // Handle Supabase error format with 'error_code' field
+                            let errorMessage = json["msg"] as? String ?? "Authentication failed"
+                            print("📱 Email sign in error from server: \(errorMessage)")
+                            self?.errorMessage = errorMessage
+                        } else {
+                            print("📱 Invalid email sign in response")
+                            print("📱 Expected access_token and refresh_token, but got: \(json)")
+                            self?.errorMessage = "Invalid response from server"
+                        }
+                    }
+                } catch {
+                    print("📱 Failed to parse email sign in response: \(error)")
+                    self?.errorMessage = "Failed to parse server response"
+                }
+            }
+        }.resume()
+    }
+    
+    func signUpWithEmail(email: String, password: String) {
+        isLoading = true
+        errorMessage = nil
+        
+        print("📱 Starting email sign up for: \(email)")
+        
+        // Create the sign up request using the correct Supabase Auth API format
+        var urlComponents = URLComponents(string: "\(Configuration.supabaseURL)/auth/v1/signup")!
+        urlComponents.queryItems = [
+            URLQueryItem(name: "apikey", value: Configuration.supabaseAnonKey)
+        ]
+        
+        var request = URLRequest(url: urlComponents.url!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        
+        let body = [
+            "email": email,
+            "password": password
+        ]
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            DispatchQueue.main.async {
+                self.isLoading = false
+                self.errorMessage = "Failed to create request body"
+            }
+            return
+        }
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                
+                if let error = error {
+                    print("📱 Email sign up error: \(error.localizedDescription)")
+                    self?.errorMessage = error.localizedDescription
+                    return
+                }
+                
+                // Check HTTP status code
+                if let httpResponse = response as? HTTPURLResponse {
+                    print("📱 HTTP Status Code: \(httpResponse.statusCode)")
+                    if httpResponse.statusCode != 200 {
+                        print("📱 HTTP Error: \(httpResponse.statusCode)")
+                        if let data = data, let errorString = String(data: data, encoding: .utf8) {
+                            print("📱 Error response: \(errorString)")
+                        }
+                    }
+                }
+                
+                guard let data = data else {
+                    print("📱 No data received from email sign up")
+                    self?.errorMessage = "No data received"
+                    return
+                }
+                
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        print("📱 Email sign up response: \(json)")
+                        print("📱 Signup response keys: \(Array(json.keys))")
+                        
+                        // Check if user exists in response
+                        if let user = json["user"] as? [String: Any] {
+                            print("📱 User object found: \(user)")
+                            print("📱 User keys: \(Array(user.keys))")
+                        }
+                        
+                        if let accessToken = json["access_token"] as? String,
+                           let refreshToken = json["refresh_token"] as? String {
+                            
+                            print("📱 Email sign up successful, tokens received")
+                            
+                            // Save tokens to Keychain for persistence
+                            self?.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
+                            
+                            // Store tokens and mark as authenticated
+                            self?.isAuthenticated = true
+                            self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+                            print("📱 Email sign up authentication successful")
+                            print("📱 isAuthenticated set to: \(self?.isAuthenticated ?? false)")
+                            
+                            // Force UI update
+                            self?.objectWillChange.send()
+                            
+                            // Navigate to native-handoff to set up web app session, then redirect to dashboard
+                            var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
+                            handoffComponents.queryItems = [
+                                URLQueryItem(name: "access_token", value: accessToken),
+                                URLQueryItem(name: "refresh_token", value: refreshToken)
+                            ]
+                            
+                            if let handoffURL = handoffComponents.url {
+                                print("📱 Posting navigateToURL notification with URL: \(handoffURL)")
+                                NotificationCenter.default.post(
+                                    name: .navigateToURL,
+                                    object: nil,
+                                    userInfo: ["url": handoffURL]
+                                )
+                            } else {
+                                print("📱 Failed to create handoff URL")
+                            }
+                            
+                        } else if let userEmail = json["email"] as? String,
+                                  let confirmationSentAt = json["confirmation_sent_at"] as? String {
+                            
+                            // Email confirmation required - response has confirmation_sent_at
+                            print("📱 Email sign up successful but requires email confirmation")
+                            self?.requiresEmailConfirmation = true
+                            self?.pendingEmailConfirmation = userEmail
+                            
+                        } else if let user = json["user"] as? [String: Any],
+                                  let userEmail = user["email"] as? String,
+                                  user["email_confirmed_at"] == nil {
+                            
+                            // Email confirmation required - nested user object
+                            print("📱 Email sign up successful but requires email confirmation (nested user)")
+                            self?.requiresEmailConfirmation = true
+                            self?.pendingEmailConfirmation = userEmail
+                            
+                        } else if let user = json["user"] as? [String: Any],
+                                  let userEmail = user["email"] as? String {
+                            
+                            // Check if this is a signup response without tokens (email confirmation required)
+                            if json["access_token"] == nil && json["refresh_token"] == nil {
+                                print("📱 Email sign up successful but requires email confirmation (no tokens)")
+                                self?.requiresEmailConfirmation = true
+                                self?.pendingEmailConfirmation = userEmail
+                            } else {
+                                print("📱 Unexpected signup response structure: \(json)")
+                                self?.errorMessage = "Unexpected response from server"
+                            }
+                            
+                        } else if let error = json["error"] as? String {
+                            print("📱 Email sign up error from server: \(error)")
+                            self?.errorMessage = error
+                        } else if let msg = json["msg"] as? String {
+                            // Handle Supabase error format with 'msg' field
+                            print("📱 Email sign up error from server: \(msg)")
+                            self?.errorMessage = msg
+                        } else if let errorCode = json["error_code"] as? String {
+                            // Handle Supabase error format with 'error_code' field
+                            let errorMessage = json["msg"] as? String ?? "Sign up failed"
+                            print("📱 Email sign up error from server: \(errorMessage)")
+                            self?.errorMessage = errorMessage
+                        } else {
+                            print("📱 Invalid email sign up response")
+                            print("📱 Expected access_token and refresh_token, but got: \(json)")
+                            self?.errorMessage = "Invalid response from server"
+                        }
+                    }
+                } catch {
+                    print("📱 Failed to parse email sign up response: \(error)")
+                    self?.errorMessage = "Failed to parse server response"
+                }
+            }
+        }.resume()
+    }
     
     func signOut() {
         // Clear stored tokens from Keychain

@@ -15,6 +15,8 @@ struct ContentView: View {
         Group {
             if supabaseManager.isAuthenticated {
                 WebViewContainer(url: webViewURL ?? URL(string: "\(Configuration.webAppURL)/dashboard")!)
+            } else if supabaseManager.requiresEmailConfirmation {
+                EmailConfirmationView()
             } else {
                 AuthView()
             }

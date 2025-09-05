@@ -38,6 +38,12 @@ struct AuthView: View {
                     print("🔐 SupabaseManager isLoading: \(supabaseManager.isLoading)")
                     print("🔐 SupabaseManager isAuthenticated: \(supabaseManager.isAuthenticated)")
                 }
+                .onChange(of: supabaseManager.errorMessage) { errorMessage in
+                    if let error = errorMessage {
+                        signInError = error
+                        print("🔐 AuthView received error: \(error)")
+                    }
+                }
             
             ScrollView {
                 VStack(spacing: 0) {
@@ -357,13 +363,13 @@ struct AuthView: View {
     }
     
     private func signInWithEmail() {
-        // TODO: Implement email/password sign in
-        signInError = "Email sign in not implemented yet"
+        print("📱 AuthView: Starting email sign in")
+        supabaseManager.signInWithEmail(email: email, password: password)
     }
     
     private func signUpWithEmail() {
-        // TODO: Implement email/password sign up
-        signInError = "Email sign up not implemented yet"
+        print("📱 AuthView: Starting email sign up")
+        supabaseManager.signUpWithEmail(email: email, password: password)
     }
 }
 

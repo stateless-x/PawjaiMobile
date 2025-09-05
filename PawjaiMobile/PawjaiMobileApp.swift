@@ -14,17 +14,14 @@ struct PawjaiMobileApp: App {
         
         // Register fonts with error handling
         do {
-            // Temporarily disable font loading to test if it's causing the issue
-            // FontManager.shared.registerFonts()
-            print("⚠️ Font loading temporarily disabled for debugging")
+            FontManager.shared.registerFonts()
+            print("✅ Font registration completed")
         } catch {
             print("❌ Font registration failed: \(error)")
         }
         
         // Setup fonts with error handling
-        // Temporarily disable font setup to test if it's causing the issue
-        // setupDefaultFonts()
-        print("⚠️ Font setup temporarily disabled for debugging")
+        setupDefaultFonts()
         print("✅ App initialization complete")
     }
     
