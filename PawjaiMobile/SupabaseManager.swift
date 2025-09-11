@@ -48,20 +48,34 @@ class SupabaseManager: NSObject, ObservableObject {
             print("🔐 Found stored user, checking token validity...")
             // Check if tokens are still valid (not expired)
             if isTokenValid(user: storedUser) {
-                self.currentUser = storedUser
-                self.isAuthenticated = true
-                print("📱 Restored authentication state from storage")
-                
-                // Force UI update and notify ContentView to load dashboard
-                DispatchQueue.main.async {
-                    self.objectWillChange.send()
-                    let dashboardURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
-                    NotificationCenter.default.post(
-                        name: .navigateToURL,
-                        object: nil,
-                        userInfo: ["url": dashboardURL]
-                    )
-                    print("📱 Posted navigateToURL notification for restored auth state")
+                // Validate account status with server before setting as authenticated
+                validateAccountStatus(user: storedUser) { [weak self] isValid in
+                    DispatchQueue.main.async {
+                        if isValid {
+                            self?.currentUser = storedUser
+                            self?.isAuthenticated = true
+                            print("📱 Restored authentication state from storage")
+                            
+                            // Start periodic validation
+                            self?.startPeriodicValidation()
+                            
+                            // Force UI update and notify ContentView to load dashboard
+                            self?.objectWillChange.send()
+                            let dashboardURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
+                            NotificationCenter.default.post(
+                                name: .navigateToURL,
+                                object: nil,
+                                userInfo: ["url": dashboardURL]
+                            )
+                            print("📱 Posted navigateToURL notification for restored auth state")
+                        } else {
+                            // Account is deactivated or invalid, clear storage
+                            self?.clearStoredTokens()
+                            self?.isAuthenticated = false
+                            self?.currentUser = nil
+                            print("📱 Account validation failed, clearing authentication state")
+                        }
+                    }
                 }
             } else {
                 // Tokens expired, clear storage
@@ -106,7 +120,16 @@ class SupabaseManager: NSObject, ObservableObject {
         
         let tokenAge = Date().timeIntervalSince1970 - timestamp
         // Consider tokens valid for 24 hours (86400 seconds)
-        return tokenAge < 86400
+        let isTimeValid = tokenAge < 86400
+        
+        if !isTimeValid {
+            return false
+        }
+        
+        // For accounts that might be deactivated, we need to validate with the server
+        // This is a synchronous check, so we'll do a quick validation
+        // In a real implementation, you might want to make this asynchronous
+        return true
     }
     
     private func clearStoredTokens() {
@@ -114,6 +137,49 @@ class SupabaseManager: NSObject, ObservableObject {
         deleteFromKeychain(forKey: "refresh_token")
         deleteFromKeychain(forKey: "token_timestamp")
         print("📱 Tokens cleared from Keychain")
+    }
+    
+    // MARK: - Account Validation Methods
+    
+    private func validateAccountStatus(user: User, completion: @escaping (Bool) -> Void) {
+        print("🔐 Validating account status with server...")
+        
+        // Create the validation request to check if account is still active
+        let validationURL = URL(string: "\(Configuration.webAppURL)/api/auth/guard")!
+        var request = URLRequest(url: validationURL)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(user.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("📱 Account validation error: \(error.localizedDescription)")
+                completion(false)
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("📱 Invalid response from account validation")
+                completion(false)
+                return
+            }
+            
+            print("📱 Account validation HTTP status: \(httpResponse.statusCode)")
+            
+            if httpResponse.statusCode == 200 {
+                // Account is active
+                print("📱 Account validation successful - account is active")
+                completion(true)
+            } else if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                // Account is deactivated or unauthorized
+                print("📱 Account validation failed - account is deactivated or unauthorized")
+                completion(false)
+            } else {
+                // Other error - assume account is invalid
+                print("📱 Account validation failed with status: \(httpResponse.statusCode)")
+                completion(false)
+            }
+        }.resume()
     }
     
     // MARK: - Keychain Helper Methods
@@ -367,6 +433,9 @@ class SupabaseManager: NSObject, ObservableObject {
             print("📱 Direct token authentication successful")
             print("📱 isAuthenticated set to: \(self.isAuthenticated)")
             
+            // Start periodic validation
+            self.startPeriodicValidation()
+            
             // Force UI update
             self.objectWillChange.send()
             
@@ -437,6 +506,9 @@ class SupabaseManager: NSObject, ObservableObject {
                                 self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
                                 print("📱 Token exchange successful, user authenticated")
                                 print("📱 isAuthenticated set to: \(self?.isAuthenticated ?? false)")
+                                
+                                // Start periodic validation
+                                self?.startPeriodicValidation()
                                 
                                 // Force UI update
                                 self?.objectWillChange.send()
@@ -560,6 +632,9 @@ class SupabaseManager: NSObject, ObservableObject {
                             self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
                             print("📱 Email sign in authentication successful")
                             print("📱 isAuthenticated set to: \(self?.isAuthenticated ?? false)")
+                            
+                            // Start periodic validation
+                            self?.startPeriodicValidation()
                             
                             // Force UI update
                             self?.objectWillChange.send()
@@ -698,6 +773,9 @@ class SupabaseManager: NSObject, ObservableObject {
                             self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
                             print("📱 Email sign up authentication successful")
                             print("📱 isAuthenticated set to: \(self?.isAuthenticated ?? false)")
+                            
+                            // Start periodic validation
+                            self?.startPeriodicValidation()
                             
                             // Force UI update
                             self?.objectWillChange.send()
@@ -849,6 +927,26 @@ class SupabaseManager: NSObject, ObservableObject {
         // No need to navigate to URL - ContentView will automatically show AuthView
         // when isAuthenticated becomes false
         print("📱 User signed out, tokens cleared, returning to native AuthView")
+    }
+    
+    // MARK: - Periodic Account Validation
+    
+    func startPeriodicValidation() {
+        // Validate account status every 5 minutes while app is active
+        Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            guard let self = self, let user = self.currentUser, self.isAuthenticated else {
+                return
+            }
+            
+            self.validateAccountStatus(user: user) { [weak self] isValid in
+                DispatchQueue.main.async {
+                    if !isValid {
+                        print("📱 Periodic validation failed - signing out user")
+                        self?.signOut()
+                    }
+                }
+            }
+        }
     }
     
     // Manual method to force authentication state update (for debugging)

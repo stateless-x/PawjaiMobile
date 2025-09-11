@@ -141,6 +141,18 @@ struct WebView: UIViewRepresentable {
                 return
             }
             
+            // Check if user is being redirected to account-disabled page
+            if path.contains("/auth/account-disabled") {
+                print("📱 Account disabled detected, signing out user")
+                // Clear authentication and redirect to AuthView
+                DispatchQueue.main.async {
+                    SupabaseManager.shared.signOut()
+                }
+                
+                decisionHandler(.cancel)
+                return
+            }
+            
             // Allow all other navigation actions
             decisionHandler(.allow)
         }
