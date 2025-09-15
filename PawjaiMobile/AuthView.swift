@@ -358,7 +358,7 @@ struct AuthView: View {
     }
     
     private func getSubtitle() -> String {
-        return "ง่าย รวดเร็ว และปลอดภัย"
+        return "สุขภาพน้องดี คนในบ้านก็อุ่นใจ"
     }
     
     private func handleEmailAuth() {
