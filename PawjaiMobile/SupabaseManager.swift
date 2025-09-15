@@ -249,7 +249,7 @@ class SupabaseManager: NSObject, ObservableObject {
                 self?.isLoading = false
                 
                 print("📱 OAuth callback received")
-                print("📱 Callback URL: \(callbackURL?.absoluteString ?? "nil")")
+                // print("📱 Callback URL: \(callbackURL?.absoluteString ?? "nil")")
                 print("📱 Error: \(error?.localizedDescription ?? "nil")")
                 
                 if let error = error {
@@ -289,7 +289,7 @@ class SupabaseManager: NSObject, ObservableObject {
                 self?.isLoading = false
                 
                 print("📱 Apple OAuth callback received")
-                print("📱 Callback URL: \(callbackURL?.absoluteString ?? "nil")")
+                // print("📱 Callback URL: \(callbackURL?.absoluteString ?? "nil")")
                 print("📱 Error: \(error?.localizedDescription ?? "nil")")
                 
                 if let error = error {
@@ -304,7 +304,7 @@ class SupabaseManager: NSObject, ObservableObject {
                     return
                 }
                 
-                print("📱 Processing Apple OAuth callback: \(callbackURL)")
+                // print("📱 Processing Apple OAuth callback: \(callbackURL)")
                 self?.handleOAuthCallback(url: callbackURL)
             }
         }
@@ -337,12 +337,12 @@ class SupabaseManager: NSObject, ObservableObject {
     }
     
     private func handleOAuthCallback(url: URL) {
-        print("📱 Received callback URL: \(url)")
+        // print("📱 Received callback URL: \(url)")
         print("📱 URL scheme: \(url.scheme ?? "nil")")
         print("📱 URL host: \(url.host ?? "nil")")
         print("📱 URL path: \(url.path)")
         print("📱 URL query: \(url.query ?? "nil")")
-        print("📱 URL fragment: \(url.fragment ?? "nil")")
+        // print("📱 URL fragment: \(url.fragment ?? "nil")")
         
         // Check if we have tokens directly in the fragment (Supabase direct response)
         if let fragment = url.fragment, !fragment.isEmpty {
@@ -381,7 +381,7 @@ class SupabaseManager: NSObject, ObservableObject {
     }
     
     private func parseTokensFromFragment(_ fragment: String) {
-        print("📱 Parsing tokens from fragment: \(fragment)")
+        // print("📱 Parsing tokens from fragment: \(fragment)")
         
         // Parse the fragment as URL query parameters
         var fragmentComponents = URLComponents()

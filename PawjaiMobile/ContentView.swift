@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var supabaseManager = SupabaseManager.shared
+    @StateObject private var notificationManager = NotificationManager.shared
     @State private var webViewURL: URL?
     
     var body: some View {
@@ -48,6 +49,16 @@ struct ContentView: View {
             if isAuthenticated && webViewURL == nil {
                 webViewURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
                 print("📱 Set WebView URL to dashboard after auth change: \(webViewURL?.absoluteString ?? "nil")")
+            }
+            
+            // Setup notifications when user is authenticated
+            if isAuthenticated {
+                if notificationManager.isAuthorized {
+                    notificationManager.scheduleDailyNotification()
+                    print("🔔 Daily notifications scheduled for authenticated user (12:00 PM)")
+                } else {
+                    notificationManager.requestNotificationPermission()
+                }
             }
         }
     }

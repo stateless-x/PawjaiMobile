@@ -9,6 +9,8 @@ import SwiftUI
 
 @main
 struct PawjaiMobileApp: App {
+    @StateObject private var notificationManager = NotificationManager.shared
+    
     init() {
         print("🚀 PawjaiMobileApp initializing...")
         
@@ -22,6 +24,10 @@ struct PawjaiMobileApp: App {
         
         // Setup fonts with error handling
         setupDefaultFonts()
+        
+        // Setup notifications
+        NotificationManager.shared.setupNotifications()
+        
         print("✅ App initialization complete")
     }
     
