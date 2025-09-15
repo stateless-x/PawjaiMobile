@@ -23,8 +23,17 @@ struct WebView: UIViewRepresentable {
         configuration.mediaTypesRequiringUserActionForPlayback = []
         
         // Allow camera and microphone access
-        configuration.preferences.javaScriptEnabled = true
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+        
+        // Configure JavaScript settings using the newer API
+        if #available(iOS 14.0, *) {
+            let preferences = WKWebpagePreferences()
+            preferences.allowsContentJavaScript = true
+            configuration.defaultWebpagePreferences = preferences
+        } else {
+            // Fallback for iOS < 14
+            configuration.preferences.javaScriptEnabled = true
+        }
         
         // Enable file uploads and camera capture
         configuration.allowsAirPlayForMediaPlayback = true
@@ -75,6 +84,13 @@ struct WebView: UIViewRepresentable {
             DispatchQueue.main.async {
                 self.parent.isLoading = true
                 self.parent.errorMessage = nil
+                
+                // Ensure we have a valid token before loading
+                SupabaseManager.shared.ensureValidToken { success in
+                    if !success {
+                        print("📱 Token validation failed, user may need to re-authenticate")
+                    }
+                }
             }
         }
         

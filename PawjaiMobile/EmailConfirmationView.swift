@@ -177,7 +177,7 @@ struct EmailConfirmationView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToURL)) { notification in
-            if let url = notification.userInfo?["url"] as? URL {
+            if notification.userInfo?["url"] is URL {
                 navigateToWebView = true
             }
         }

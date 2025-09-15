@@ -42,8 +42,8 @@ struct AuthView: View {
                     print("🔐 SupabaseManager isLoading: \(supabaseManager.isLoading)")
                     print("🔐 SupabaseManager isAuthenticated: \(supabaseManager.isAuthenticated)")
                 }
-                .onChange(of: supabaseManager.errorMessage) { errorMessage in
-                    if let error = errorMessage {
+                .onChange(of: supabaseManager.errorMessage) {
+                    if let error = supabaseManager.errorMessage {
                         signInError = error
                         print("🔐 AuthView received error: \(error)")
                     }
@@ -330,7 +330,7 @@ struct AuthView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToURL)) { notification in
-            if let url = notification.userInfo?["url"] as? URL {
+            if notification.userInfo?["url"] is URL {
                 navigateToWebView = true
             }
         }
@@ -719,13 +719,13 @@ struct ForgotPasswordView: View {
                 }
             }
         }
-        .onChange(of: success) { newValue in
-            if newValue {
+        .onChange(of: success) {
+            if success {
                 isLoading = false
             }
         }
-        .onChange(of: error) { newValue in
-            if !newValue.isEmpty {
+        .onChange(of: error) {
+            if !error.isEmpty {
                 isLoading = false
             }
         }

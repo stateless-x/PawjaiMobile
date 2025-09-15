@@ -14,13 +14,9 @@ struct PawjaiMobileApp: App {
     init() {
         print("🚀 PawjaiMobileApp initializing...")
         
-        // Register fonts with error handling
-        do {
-            FontManager.shared.registerFonts()
-            print("✅ Font registration completed")
-        } catch {
-            print("❌ Font registration failed: \(error)")
-        }
+        // Register fonts
+        FontManager.shared.registerFonts()
+        print("✅ Font registration completed")
         
         // Setup fonts with error handling
         setupDefaultFonts()

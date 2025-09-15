@@ -119,16 +119,21 @@ class SupabaseManager: NSObject, ObservableObject {
         }
         
         let tokenAge = Date().timeIntervalSince1970 - timestamp
-        // Consider tokens valid for 24 hours (86400 seconds)
-        let isTimeValid = tokenAge < 86400
+        // Consider tokens valid for 1 hour (3600 seconds) to allow for refresh
+        let isTimeValid = tokenAge < 3600
         
         if !isTimeValid {
+            // Try to refresh the token before considering it invalid
+            refreshAccessToken { [weak self] success in
+                if !success {
+                    DispatchQueue.main.async {
+                        self?.signOut()
+                    }
+                }
+            }
             return false
         }
         
-        // For accounts that might be deactivated, we need to validate with the server
-        // This is a synchronous check, so we'll do a quick validation
-        // In a real implementation, you might want to make this asynchronous
         return true
     }
     
@@ -137,6 +142,81 @@ class SupabaseManager: NSObject, ObservableObject {
         deleteFromKeychain(forKey: "refresh_token")
         deleteFromKeychain(forKey: "token_timestamp")
         print("📱 Tokens cleared from Keychain")
+    }
+    
+    // MARK: - Token Refresh Methods
+    
+    private func refreshAccessToken(completion: @escaping (Bool) -> Void) {
+        guard let refreshToken = loadFromKeychain(forKey: "refresh_token") else {
+            print("📱 No refresh token available")
+            completion(false)
+            return
+        }
+        
+        print("📱 Refreshing access token...")
+        
+        // Create the token refresh request
+        let tokenURL = URL(string: "\(Configuration.supabaseURL)/auth/v1/token")!
+        var request = URLRequest(url: tokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(Configuration.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        
+        let body = [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken
+        ]
+        
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            print("📱 Failed to create refresh request body: \(error)")
+            completion(false)
+            return
+        }
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    print("📱 Token refresh error: \(error.localizedDescription)")
+                    completion(false)
+                    return
+                }
+                
+                guard let data = data else {
+                    print("📱 No data received from token refresh")
+                    completion(false)
+                    return
+                }
+                
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        if let accessToken = json["access_token"] as? String,
+                           let refreshToken = json["refresh_token"] as? String {
+                            
+                            print("📱 Token refresh successful")
+                            
+                            // Save new tokens
+                            self?.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
+                            
+                            // Update current user
+                            self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+                            
+                            completion(true)
+                        } else if let error = json["error"] as? String {
+                            print("📱 Token refresh error from server: \(error)")
+                            completion(false)
+                        } else {
+                            print("📱 Invalid token refresh response")
+                            completion(false)
+                        }
+                    }
+                } catch {
+                    print("📱 Failed to parse token refresh response: \(error)")
+                    completion(false)
+                }
+            }
+        }.resume()
     }
     
     // MARK: - Account Validation Methods
@@ -317,7 +397,7 @@ class SupabaseManager: NSObject, ObservableObject {
         // Create the Supabase OAuth URL directly
         var components = URLComponents(string: "\(Configuration.supabaseURL)/auth/v1/authorize")!
         
-        var queryItems = [
+        let queryItems = [
             URLQueryItem(name: "provider", value: provider),
             URLQueryItem(name: "redirect_to", value: Configuration.redirectURL),
             URLQueryItem(name: "response_type", value: "code"),
@@ -671,7 +751,7 @@ class SupabaseManager: NSObject, ObservableObject {
                             // Handle Supabase error format with 'msg' field
                             print("📱 Email sign in error from server: \(msg)")
                             self?.errorMessage = msg
-                        } else if let errorCode = json["error_code"] as? String {
+                        } else if json["error_code"] != nil {
                             // Handle Supabase error format with 'error_code' field
                             let errorMessage = json["msg"] as? String ?? "Authentication failed"
                             print("📱 Email sign in error from server: \(errorMessage)")
@@ -799,7 +879,7 @@ class SupabaseManager: NSObject, ObservableObject {
                             }
                             
                         } else if let userEmail = json["email"] as? String,
-                                  let confirmationSentAt = json["confirmation_sent_at"] as? String {
+                                  json["confirmation_sent_at"] != nil {
                             
                             // Email confirmation required - response has confirmation_sent_at
                             print("📱 Email sign up successful but requires email confirmation")
@@ -835,7 +915,7 @@ class SupabaseManager: NSObject, ObservableObject {
                             // Handle Supabase error format with 'msg' field
                             print("📱 Email sign up error from server: \(msg)")
                             self?.errorMessage = msg
-                        } else if let errorCode = json["error_code"] as? String {
+                        } else if json["error_code"] != nil {
                             // Handle Supabase error format with 'error_code' field
                             let errorMessage = json["msg"] as? String ?? "Sign up failed"
                             print("📱 Email sign up error from server: \(errorMessage)")
@@ -932,17 +1012,24 @@ class SupabaseManager: NSObject, ObservableObject {
     // MARK: - Periodic Account Validation
     
     func startPeriodicValidation() {
-        // Validate account status every 5 minutes while app is active
-        Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+        // Validate account status every 30 minutes while app is active
+        // This is less aggressive to prevent unnecessary logouts
+        Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
             guard let self = self, let user = self.currentUser, self.isAuthenticated else {
                 return
             }
             
-            self.validateAccountStatus(user: user) { [weak self] isValid in
-                DispatchQueue.main.async {
-                    if !isValid {
-                        print("📱 Periodic validation failed - signing out user")
-                        self?.signOut()
+            // First try to refresh the token if it's close to expiring
+            self.refreshAccessToken { [weak self] refreshSuccess in
+                if !refreshSuccess {
+                    // If refresh fails, then validate account status
+                    self?.validateAccountStatus(user: user) { [weak self] isValid in
+                        DispatchQueue.main.async {
+                            if !isValid {
+                                print("📱 Periodic validation failed - signing out user")
+                                self?.signOut()
+                            }
+                        }
                     }
                 }
             }
@@ -954,6 +1041,38 @@ class SupabaseManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             print("📱 Forcing authentication state update")
             self.objectWillChange.send()
+        }
+    }
+    
+    // Proactive token refresh - call this before making API requests
+    func ensureValidToken(completion: @escaping (Bool) -> Void) {
+        guard currentUser != nil, isAuthenticated else {
+            completion(false)
+            return
+        }
+        
+        // Check if token is close to expiring (within 5 minutes)
+        guard let timestampString = loadFromKeychain(forKey: "token_timestamp"),
+              let timestamp = Double(timestampString) else {
+            completion(false)
+            return
+        }
+        
+        let tokenAge = Date().timeIntervalSince1970 - timestamp
+        let timeUntilExpiry = 3600 - tokenAge // Assuming 1 hour token lifetime
+        
+        if timeUntilExpiry < 300 { // Less than 5 minutes remaining
+            print("📱 Token expires soon, refreshing proactively...")
+            refreshAccessToken { [weak self] success in
+                DispatchQueue.main.async {
+                    if success {
+                        self?.objectWillChange.send()
+                    }
+                    completion(success)
+                }
+            }
+        } else {
+            completion(true)
         }
     }
 }

@@ -44,15 +44,15 @@ struct ContentView: View {
                 print("📱 Set WebView URL to dashboard: \(webViewURL?.absoluteString ?? "nil")")
             }
         }
-        .onChange(of: supabaseManager.isAuthenticated) { isAuthenticated in
-            print("📱 Authentication state changed to: \(isAuthenticated)")
-            if isAuthenticated && webViewURL == nil {
+        .onChange(of: supabaseManager.isAuthenticated) {
+            print("📱 Authentication state changed to: \(supabaseManager.isAuthenticated)")
+            if supabaseManager.isAuthenticated && webViewURL == nil {
                 webViewURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
                 print("📱 Set WebView URL to dashboard after auth change: \(webViewURL?.absoluteString ?? "nil")")
             }
             
             // Setup notifications when user is authenticated
-            if isAuthenticated {
+            if supabaseManager.isAuthenticated {
                 if notificationManager.isAuthorized {
                     notificationManager.scheduleDailyNotification()
                     print("🔔 Daily notifications scheduled for authenticated user (12:00 PM)")
