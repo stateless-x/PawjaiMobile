@@ -43,6 +43,7 @@ struct WebView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.bounces = false
+        webView.scrollView.contentInsetAdjustmentBehavior = .always
         
         // Enable file uploads
         webView.configuration.userContentController.add(context.coordinator, name: "fileUpload")
@@ -279,7 +280,7 @@ struct WebViewContainer: View {
     var body: some View {
         ZStack {
             WebView(url: currentURL, isLoading: $isLoading, errorMessage: $errorMessage)
-                .edgesIgnoringSafeArea(.all)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
             
             if isLoading {
                 VStack {
