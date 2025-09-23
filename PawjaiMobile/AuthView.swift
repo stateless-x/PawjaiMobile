@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct AuthView: View {
     @EnvironmentObject var language: LanguageManager
@@ -112,6 +113,7 @@ struct AuthView: View {
                                     }
                                     .foregroundColor(.black.opacity(0.6))
                                 }
+                                .disabled(supabaseManager.isLoading)
                                 
                                 // Toggle between Sign In/Sign Up
                                 HStack(spacing: 4) {
@@ -473,6 +475,7 @@ struct PlaceholderStyle: ViewModifier {
 
 // Google Sign In Button
 struct GoogleSignInButton: View {
+    @EnvironmentObject var language: LanguageManager
     @StateObject private var supabaseManager = SupabaseManager.shared
     let authMode: AuthView.AuthModeType
     
@@ -484,7 +487,7 @@ struct GoogleSignInButton: View {
                 // Google logo
                 GoogleLogo()
                 
-                Text(authMode == .signin ? L("เข้าสู่ระบบด้วย Google", "Sign in with Google") : L("สมัครด้วย Google", "Sign up with Google"))
+                Text(authMode == .signin ? language.t("เข้าสู่ระบบด้วย Google", "Sign in with Google") : language.t("สมัครด้วย Google", "Sign up with Google"))
                     .font(.kanitMedium(size: 16))
                     .foregroundColor(.black)
             }
@@ -503,6 +506,7 @@ struct GoogleSignInButton: View {
 
 // Apple Sign In Button
 struct AppleSignInButton: View {
+    @EnvironmentObject var language: LanguageManager
     @StateObject private var supabaseManager = SupabaseManager.shared
     let authMode: AuthView.AuthModeType
     
@@ -514,7 +518,7 @@ struct AppleSignInButton: View {
                 // Apple logo
                 AppleLogo()
                 
-                Text(authMode == .signin ? L("เข้าสู่ระบบด้วย Apple", "Sign in with Apple") : L("สมัครด้วย Apple", "Sign up with Apple"))
+                Text(authMode == .signin ? language.t("เข้าสู่ระบบด้วย Apple", "Sign in with Apple") : language.t("สมัครด้วย Apple", "Sign up with Apple"))
                     .font(.kanitMedium(size: 16))
                     .foregroundColor(.white)
             }
@@ -548,13 +552,14 @@ struct AppleLogo: View {
 
 // OR Separator
 struct OrSeparator: View {
+    @EnvironmentObject var language: LanguageManager
     var body: some View {
         HStack {
             Rectangle()
                 .fill(Color.gray.opacity(0.3))
                 .frame(height: 1)
             
-            Text(L("หรือ", "or"))
+            Text(language.t("หรือ", "or"))
                 .font(.kanitRegular(size: 14))
                 .foregroundColor(.black.opacity(0.6))
                 .padding(.horizontal, 16)
