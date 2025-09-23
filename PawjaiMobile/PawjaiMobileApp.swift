@@ -10,6 +10,7 @@ import SwiftUI
 @main
 struct PawjaiMobileApp: App {
     @StateObject private var notificationManager = NotificationManager.shared
+    @StateObject private var language = LanguageManager.shared
     
     init() {
         print("🚀 PawjaiMobileApp initializing...")
@@ -30,6 +31,7 @@ struct PawjaiMobileApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(language)
                 .onAppear {
                     print("📱 ContentView appeared in WindowGroup")
                 }

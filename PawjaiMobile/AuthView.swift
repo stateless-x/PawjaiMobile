@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct AuthView: View {
+    @EnvironmentObject var language: LanguageManager
     @StateObject private var supabaseManager = SupabaseManager.shared
     @State private var navigateToWebView = false
     @State private var mode: AuthMode = .oauth
@@ -77,6 +78,7 @@ struct AuthView: View {
                                 .foregroundColor(.black.opacity(0.7))
                                 .multilineTextAlignment(.center)
                         }
+                        .padding(.horizontal, 24)
                     }
                     .padding(.bottom, 32)
                     
@@ -105,7 +107,7 @@ struct AuthView: View {
                                     HStack(spacing: 8) {
                                         Image(systemName: "envelope")
                                             .font(.system(size: 16))
-                                        Text("ใช้อีเมลและรหัสผ่าน")
+                                        Text(L("ใช้อีเมลและรหัสผ่าน", "Use email and password"))
                                             .font(.kanitMedium(size: 14))
                                     }
                                     .foregroundColor(.black.opacity(0.6))
@@ -113,11 +115,11 @@ struct AuthView: View {
                                 
                                 // Toggle between Sign In/Sign Up
                                 HStack(spacing: 4) {
-                                    Text(authMode == .signin ? "ยังไม่มีบัญชี?" : "มีบัญชีอยู่แล้ว?")
+                                    Text(authMode == .signin ? L("ยังไม่มีบัญชี?", "Don't have an account?") : L("มีบัญชีอยู่แล้ว?", "Already have an account?"))
                                         .font(.kanitRegular(size: 14))
                                         .foregroundColor(.black.opacity(0.6))
                                     
-                                    Button(authMode == .signin ? "สมัครสมาชิก" : "เข้าสู่ระบบ") {
+                                    Button(authMode == .signin ? L("สมัครสมาชิก", "Sign up") : L("เข้าสู่ระบบ", "Sign in")) {
                                         withAnimation(.easeInOut(duration: 0.3)) {
                                             authMode = authMode == .signin ? .signup : .signin
                                             signInError = ""
@@ -133,7 +135,7 @@ struct AuthView: View {
                             VStack(spacing: 16) {
                                 // Email field
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text("อีเมล")
+                                    Text(L("อีเมล", "Email"))
                                         .font(.kanitMedium(size: 14))
                                         .foregroundColor(.black)
                                     
@@ -158,7 +160,7 @@ struct AuthView: View {
                                 
                                 // Password field
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text("รหัสผ่าน")
+                                    Text(L("รหัสผ่าน", "Password"))
                                         .font(.kanitMedium(size: 14))
                                         .foregroundColor(.black)
                                     
@@ -183,7 +185,7 @@ struct AuthView: View {
                                         .disabled(supabaseManager.isLoading)
                                         
                                         if password.isEmpty {
-                                            Text(authMode == .signup ? "สร้างรหัสผ่านที่ปลอดภัย" : "ใส่รหัสผ่าน")
+                                            Text(authMode == .signup ? L("สร้างรหัสผ่านที่ปลอดภัย", "Create a secure password") : L("ใส่รหัสผ่าน", "Enter password"))
                                                 .font(.kanitRegular(size: 16))
                                                 .foregroundColor(Color.gray.opacity(0.8))
                                                 .padding(.horizontal, 16)
@@ -196,7 +198,7 @@ struct AuthView: View {
                                 // Confirm Password field (only for signup)
                                 if authMode == .signup {
                                     VStack(alignment: .leading, spacing: 8) {
-                                        Text("ยืนยันรหัสผ่าน")
+                                        Text(L("ยืนยันรหัสผ่าน", "Confirm password"))
                                             .font(.kanitMedium(size: 14))
                                             .foregroundColor(.black)
                                         
@@ -221,7 +223,7 @@ struct AuthView: View {
                                             .disabled(supabaseManager.isLoading)
                                             
                                             if confirmPassword.isEmpty {
-                                                Text("ยืนยันรหัสผ่าน")
+                                                Text(L("ยืนยันรหัสผ่าน", "Confirm password"))
                                                     .font(.kanitRegular(size: 16))
                                                     .foregroundColor(Color.gray.opacity(0.8))
                                                     .padding(.horizontal, 16)
@@ -258,7 +260,7 @@ struct AuthView: View {
                                 if authMode == .signin {
                                     HStack {
                                         Spacer()
-                                        Button("ลืมรหัสผ่าน?") {
+                                        Button(L("ลืมรหัสผ่าน?", "Forgot password?")) {
                                             showForgotPassword = true
                                         }
                                         .font(.kanitMedium(size: 14))
@@ -276,7 +278,7 @@ struct AuthView: View {
                                                 .scaleEffect(0.8)
                                                 .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                         }
-                                        Text(authMode == .signin ? "เข้าสู่ระบบ" : "เริ่มต้นดูแลน้องให้ดียิ่งขึ้น")
+                                        Text(authMode == .signin ? L("เข้าสู่ระบบ", "Sign in") : L("เริ่มต้นดูแลน้องให้ดียิ่งขึ้น", "Start caring better"))
                                             .font(.kanitMedium(size: 16))
                                     }
                                     .foregroundColor(.white)
@@ -295,18 +297,18 @@ struct AuthView: View {
                                         passwordError = ""
                                     }
                                 }) {
-                                    Text("กลับไปใช้ OAuth")
+                                    Text(L("กลับไปใช้ OAuth", "Back to OAuth"))
                                         .font(.kanitMedium(size: 14))
                                         .foregroundColor(.black.opacity(0.6))
                                 }
                                 
                                 // Toggle between Sign In/Sign Up
                                 HStack(spacing: 4) {
-                                    Text(authMode == .signin ? "ยังไม่มีบัญชี?" : "มีบัญชีอยู่แล้ว?")
+                                    Text(authMode == .signin ? L("ยังไม่มีบัญชี?", "Don't have an account?") : L("มีบัญชีอยู่แล้ว?", "Already have an account?"))
                                         .font(.kanitRegular(size: 14))
                                         .foregroundColor(.black.opacity(0.6))
                                     
-                                    Button(authMode == .signin ? "สมัครสมาชิก" : "เข้าสู่ระบบ") {
+                                    Button(authMode == .signin ? L("สมัครสมาชิก", "Sign up") : L("เข้าสู่ระบบ", "Sign in")) {
                                         withAnimation(.easeInOut(duration: 0.3)) {
                                             authMode = authMode == .signin ? .signup : .signin
                                             signInError = ""
@@ -327,6 +329,30 @@ struct AuthView: View {
                     
                     Spacer(minLength: 60)
                 }
+
+                // Subtle language selector (Apple-like)
+                HStack(spacing: 6) {
+                    Button(action: { language.setLanguage(.th) }) {
+                        Text("TH")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(language.language == .th ? .white : .black.opacity(0.6))
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(
+                                Capsule().fill(language.language == .th ? Color(red: 1.0, green: 0.541, blue: 0.239) : Color(red: 1.0, green: 0.541, blue: 0.239).opacity(0.12))
+                            )
+                    }
+                    Button(action: { language.setLanguage(.en) }) {
+                        Text("EN")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(language.language == .en ? .white : .black.opacity(0.6))
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(
+                                Capsule().fill(language.language == .en ? Color(red: 1.0, green: 0.541, blue: 0.239) : Color(red: 1.0, green: 0.541, blue: 0.239).opacity(0.12))
+                            )
+                    }
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToURL)) { notification in
@@ -354,11 +380,11 @@ struct AuthView: View {
     }
     
     private func getTitle() -> String {
-        return authMode == .signin ? "ใส่ใจน้องมากขึ้นทุกวัน" : "เริ่มต้นดูแลน้องให้ดียิ่งขึ้น"
+        return authMode == .signin ? L("ใส่ใจน้องมากขึ้นทุกวัน", "Care More for Your Pet") : L("เริ่มต้นดูแลน้องให้ดียิ่งขึ้น", "Start caring for your pet better")
     }
     
     private func getSubtitle() -> String {
-        return "สุขภาพน้องดี คนในบ้านก็อุ่นใจ"
+        return L("สุขภาพน้องดี คนในบ้านก็อุ่นใจ", "Healthy pets, Happy family")
     }
     
     private func handleEmailAuth() {
@@ -368,7 +394,7 @@ struct AuthView: View {
         
         // Validate password confirmation for signup
         if authMode == .signup && password != confirmPassword {
-            passwordError = "รหัสผ่านไม่ตรงกัน"
+            passwordError = L("รหัสผ่านไม่ตรงกัน", "Passwords do not match")
             return
         }
         
@@ -402,6 +428,11 @@ struct AuthView: View {
             }
         }
     }
+}
+
+// Simple inline translator using LanguageManager
+private func L(_ th: String, _ en: String) -> String {
+    LanguageManager.shared.t(th, en)
 }
 
 // Custom text field style
@@ -453,7 +484,7 @@ struct GoogleSignInButton: View {
                 // Google logo
                 GoogleLogo()
                 
-                Text(authMode == .signin ? "เข้าสู่ระบบด้วย Google" : "สมัครด้วย Google")
+                Text(authMode == .signin ? L("เข้าสู่ระบบด้วย Google", "Sign in with Google") : L("สมัครด้วย Google", "Sign up with Google"))
                     .font(.kanitMedium(size: 16))
                     .foregroundColor(.black)
             }
@@ -483,7 +514,7 @@ struct AppleSignInButton: View {
                 // Apple logo
                 AppleLogo()
                 
-                Text(authMode == .signin ? "เข้าสู่ระบบด้วย Apple" : "สมัครด้วย Apple")
+                Text(authMode == .signin ? L("เข้าสู่ระบบด้วย Apple", "Sign in with Apple") : L("สมัครด้วย Apple", "Sign up with Apple"))
                     .font(.kanitMedium(size: 16))
                     .foregroundColor(.white)
             }
@@ -523,7 +554,7 @@ struct OrSeparator: View {
                 .fill(Color.gray.opacity(0.3))
                 .frame(height: 1)
             
-            Text("หรือ")
+            Text(L("หรือ", "or"))
                 .font(.kanitRegular(size: 14))
                 .foregroundColor(.black.opacity(0.6))
                 .padding(.horizontal, 16)
@@ -568,12 +599,12 @@ struct ForgotPasswordView: View {
                             
                             // Title and subtitle
                             VStack(spacing: 8) {
-                                Text("รีเซ็ตรหัสผ่าน")
+                                Text(L("รีเซ็ตรหัสผ่าน", "Reset password"))
                                     .font(.kanitBold(size: 24))
                                     .foregroundColor(.black)
                                     .multilineTextAlignment(.center)
                                 
-                                Text("กรุณาใส่อีเมลของคุณเพื่อรับลิงก์รีเซ็ตรหัสผ่าน")
+                                Text(L("กรุณาใส่อีเมลของคุณเพื่อรับลิงก์รีเซ็ตรหัสผ่าน", "Enter your email and we’ll send a reset link"))
                                     .font(.kanitRegular(size: 18))
                                     .foregroundColor(.black.opacity(0.7))
                                     .multilineTextAlignment(.center)
@@ -591,16 +622,16 @@ struct ForgotPasswordView: View {
                                             .font(.system(size: 60))
                                             .foregroundColor(.green)
                                         
-                                        Text("ส่งอีเมลเรียบร้อยแล้ว")
+                                        Text(L("ส่งอีเมลเรียบร้อยแล้ว", "Email sent"))
                                             .font(.kanitBold(size: 20))
                                             .foregroundColor(.black)
                                         
-                                        Text("เราได้ส่งลิงก์รีเซ็ตรหัสผ่านไปยังอีเมลของคุณแล้ว กรุณาตรวจสอบกล่องจดหมายและคลิกลิงก์เพื่อรีเซ็ตรหัสผ่าน")
+                                        Text(L("เราได้ส่งลิงก์รีเซ็ตรหัสผ่านไปยังอีเมลของคุณแล้ว กรุณาตรวจสอบกล่องจดหมายและคลิกลิงก์เพื่อรีเซ็ตรหัสผ่าน", "We sent a reset link to your email. Please check your inbox and click the link to reset your password."))
                                             .font(.kanitRegular(size: 16))
                                             .foregroundColor(.black.opacity(0.7))
                                             .multilineTextAlignment(.center)
                                         
-                                        Text("อีเมล: \(email)")
+                                        Text(L("อีเมล:", "Email:") + " \(email)")
                                             .font(.kanitMedium(size: 14))
                                             .foregroundColor(.black.opacity(0.6))
                                             .padding(.horizontal, 16)
@@ -613,7 +644,7 @@ struct ForgotPasswordView: View {
                                     VStack(spacing: 16) {
                                         // Email field
                                         VStack(alignment: .leading, spacing: 8) {
-                                            Text("อีเมล")
+                                        Text(L("อีเมล", "Email"))
                                                 .font(.kanitMedium(size: 14))
                                                 .foregroundColor(.black)
                                             
@@ -661,7 +692,7 @@ struct ForgotPasswordView: View {
                                                         .scaleEffect(0.8)
                                                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                                 }
-                                                Text("ส่งลิงก์รีเซ็ตรหัสผ่าน")
+                                                Text(L("ส่งลิงก์รีเซ็ตรหัสผ่าน", "Send reset link"))
                                                     .font(.kanitMedium(size: 16))
                                             }
                                             .foregroundColor(.white)
@@ -676,12 +707,12 @@ struct ForgotPasswordView: View {
                                 
                                 // Help text
                                 VStack(spacing: 4) {
-                                    Text("ไม่ได้รับอีเมล? ตรวจสอบโฟลเดอร์ Spam")
+                                    Text(L("ไม่ได้รับอีเมล? ตรวจสอบโฟลเดอร์ Spam", "Didn't receive the email? Check your Spam"))
                                         .font(.kanitRegular(size: 12))
                                         .foregroundColor(.black.opacity(0.5))
                                         .multilineTextAlignment(.center)
                                     
-                                    Text("ติดต่อเราได้ที่ support@pawjai.co")
+                                    Text(L("ติดต่อเราได้ที่ support@pawjai.co", "Contact us at support@pawjai.co"))
                                         .font(.kanitRegular(size: 12))
                                         .foregroundColor(.black.opacity(0.5))
                                 }
@@ -697,7 +728,7 @@ struct ForgotPasswordView: View {
                     }
                 }
             }
-            .navigationTitle("รีเซ็ตรหัสผ่าน")
+            .navigationTitle(L("รีเซ็ตรหัสผ่าน", "Reset password"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {

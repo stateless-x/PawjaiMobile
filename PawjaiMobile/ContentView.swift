@@ -10,6 +10,7 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var supabaseManager = SupabaseManager.shared
     @StateObject private var notificationManager = NotificationManager.shared
+    @EnvironmentObject var language: LanguageManager
     @State private var webViewURL: URL?
     
     var body: some View {
@@ -42,6 +43,10 @@ struct ContentView: View {
             if supabaseManager.isAuthenticated && webViewURL == nil {
                 webViewURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
                 print("📱 Set WebView URL to dashboard: \(webViewURL?.absoluteString ?? "nil")")
+            }
+            // Sync language with backend once authenticated
+            if let token = supabaseManager.currentUser?.accessToken {
+                language.syncWithBackend(accessToken: token)
             }
         }
         .onChange(of: supabaseManager.isAuthenticated) {
