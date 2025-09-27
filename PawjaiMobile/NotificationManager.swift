@@ -42,28 +42,49 @@ class NotificationManager: ObservableObject {
         }
     }
     
-    // MARK: - Schedule Daily Notification
+    // MARK: - Schedule Daily Notifications
     func scheduleDailyNotification() {
         // Remove existing notifications first
         removeAllNotifications()
         
+        // Schedule morning notification at 10:00 AM
+        scheduleNotification(
+            identifier: "daily-pet-reminder-morning",
+            title: "วันนี้อย่าลืมมาจดบันทึกให้น้องน้าาาา~",
+            body: "น้องดูแลตัวเองไม่ดีเท่าที่เราคอยช่วยดูแลเค้านะ 🧡",
+            hour: 10,
+            minute: 0
+        )
+        
+        // Schedule evening notification at 7:00 PM
+        scheduleNotification(
+            identifier: "daily-pet-reminder-evening",
+            title: "เย็นแล้ว! วันนี้ดูแลน้องยังไงบ้าง?",
+            body: "อย่าลืมมาจดบันทึกกิจกรรมของน้องวันนี้กันนะ 🧡",
+            hour: 19,
+            minute: 0
+        )
+    }
+    
+    // MARK: - Helper method to schedule individual notification
+    private func scheduleNotification(identifier: String, title: String, body: String, hour: Int, minute: Int) {
         // Create notification content
         let content = UNMutableNotificationContent()
-        content.title = "วันนี้อย่าลืมมาจดบันทึกให้น้องน้าาาา~"
-        content.body = "น้องดูแลตัวเองไม่ดีเท่าที่เราคอยช่วยดูแลเค้านะ 🧡"
+        content.title = title
+        content.body = body
         content.sound = .default
         content.badge = 1
         
-        // Create trigger for daily at 12:00 PM (mid-day)
+        // Create trigger for daily at specified time
         var dateComponents = DateComponents()
-        dateComponents.hour = 12
-        dateComponents.minute = 0
+        dateComponents.hour = hour
+        dateComponents.minute = minute
         
         let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
         
         // Create request
         let request = UNNotificationRequest(
-            identifier: "daily-pet-reminder",
+            identifier: identifier,
             content: content,
             trigger: trigger
         )
@@ -71,9 +92,10 @@ class NotificationManager: ObservableObject {
         // Add notification request
         UNUserNotificationCenter.current().add(request) { error in
             if let error = error {
-                print("❌ Failed to schedule daily notification: \(error.localizedDescription)")
+                print("❌ Failed to schedule \(identifier): \(error.localizedDescription)")
             } else {
-                print("✅ Daily notification scheduled successfully for 12:00 PM")
+                let timeString = String(format: "%02d:%02d", hour, minute)
+                print("✅ Notification '\(identifier)' scheduled successfully for \(timeString)")
             }
         }
     }
