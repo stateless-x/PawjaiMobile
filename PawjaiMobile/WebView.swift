@@ -42,58 +42,9 @@ struct WebView: UIViewRepresentable {
         // Ensure persistent website data store for cookies/localStorage retention
         configuration.websiteDataStore = .default()
         
-        // Inject JS to bridge Supabase session to native on load and app resume
-        let bridgeScript = """
-        (function() {
-          function sendTokens(session) {
-            try {
-              if (!session || !session.access_token || !session.refresh_token) return;
-              const payload = { access_token: session.access_token, refresh_token: session.refresh_token };
-              window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.authState && window.webkit.messageHandlers.authState.postMessage(payload);
-            } catch (e) {
-              // no-op
-            }
-          }
-
-          async function readSupabaseSession() {
-            try {
-              // Supabase stores under sb-*-auth-token
-              const keys = Object.keys(localStorage).filter(k => /^sb-.*-auth-token$/.test(k));
-              for (const k of keys) {
-                const raw = localStorage.getItem(k);
-                if (!raw) continue;
-                try {
-                  const parsed = JSON.parse(raw);
-                  if (parsed && parsed.currentSession) {
-                    sendTokens(parsed.currentSession);
-                    return;
-                  }
-                } catch {}
-              }
-            } catch {}
-          }
-
-          document.addEventListener('visibilitychange', function() {
-            if (document.visibilityState === 'visible') {
-              readSupabaseSession();
-            }
-          });
-
-          window.addEventListener('pageshow', function() {
-            readSupabaseSession();
-          });
-
-          // Initial run
-          readSupabaseSession();
-        })();
-        """
-        let userScript = WKUserScript(source: bridgeScript, injectionTime: .atDocumentStart, forMainFrameOnly: true)
-        configuration.userContentController.addUserScript(userScript)
-
         // Add message handlers on configuration before creating the webView
         configuration.userContentController.add(context.coordinator, name: "fileUpload")
         configuration.userContentController.add(context.coordinator, name: "signOut")
-        configuration.userContentController.add(context.coordinator, name: "authState")
 
         // Create webView after configuration is fully prepared
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -128,14 +79,6 @@ struct WebView: UIViewRepresentable {
             if message.name == "signOut" {
                 DispatchQueue.main.async {
                     SupabaseManager.shared.signOut()
-                }
-            } else if message.name == "authState" {
-                if let dict = message.body as? [String: Any],
-                   let accessToken = dict["access_token"] as? String,
-                   let refreshToken = dict["refresh_token"] as? String {
-                    DispatchQueue.main.async {
-                        SupabaseManager.shared.updateTokensFromWeb(accessToken: accessToken, refreshToken: refreshToken)
-                    }
                 }
             }
         }
