@@ -273,6 +273,7 @@
 				INFOPLIST_FILE = PawjaiMobile/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Pawjai;
 				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLName = \"pawjai-auth\";\n    CFBundleURLSchemes =     (\n        pawjai\n    );\n}";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoadsInWebContent = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Pawjai uses the camera to let you take photos of your pets.";
@@ -288,7 +289,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = co.pawjai.PawjaiMobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -311,6 +312,7 @@
 				INFOPLIST_FILE = PawjaiMobile/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Pawjai;
 				INFOPLIST_KEY_CFBundleURLTypes = "{\n    CFBundleURLName = \"pawjai-auth\";\n    CFBundleURLSchemes =     (\n        pawjai\n    );\n}";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
 				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoadsInWebContent = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Pawjai uses the camera to let you take photos of your pets.";
@@ -326,7 +328,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = co.pawjai.PawjaiMobile;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

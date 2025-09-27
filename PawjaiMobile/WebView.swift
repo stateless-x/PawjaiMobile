@@ -39,17 +39,68 @@ struct WebView: UIViewRepresentable {
         configuration.allowsAirPlayForMediaPlayback = true
         configuration.allowsPictureInPictureMediaPlayback = true
         
+        // Ensure persistent website data store for cookies/localStorage retention
+        configuration.websiteDataStore = .default()
+        
+        // Inject JS to bridge Supabase session to native on load and app resume
+        let bridgeScript = """
+        (function() {
+          function sendTokens(session) {
+            try {
+              if (!session || !session.access_token || !session.refresh_token) return;
+              const payload = { access_token: session.access_token, refresh_token: session.refresh_token };
+              window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.authState && window.webkit.messageHandlers.authState.postMessage(payload);
+            } catch (e) {
+              // no-op
+            }
+          }
+
+          async function readSupabaseSession() {
+            try {
+              // Supabase stores under sb-*-auth-token
+              const keys = Object.keys(localStorage).filter(k => /^sb-.*-auth-token$/.test(k));
+              for (const k of keys) {
+                const raw = localStorage.getItem(k);
+                if (!raw) continue;
+                try {
+                  const parsed = JSON.parse(raw);
+                  if (parsed && parsed.currentSession) {
+                    sendTokens(parsed.currentSession);
+                    return;
+                  }
+                } catch {}
+              }
+            } catch {}
+          }
+
+          document.addEventListener('visibilitychange', function() {
+            if (document.visibilityState === 'visible') {
+              readSupabaseSession();
+            }
+          });
+
+          window.addEventListener('pageshow', function() {
+            readSupabaseSession();
+          });
+
+          // Initial run
+          readSupabaseSession();
+        })();
+        """
+        let userScript = WKUserScript(source: bridgeScript, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        configuration.userContentController.addUserScript(userScript)
+
+        // Add message handlers on configuration before creating the webView
+        configuration.userContentController.add(context.coordinator, name: "fileUpload")
+        configuration.userContentController.add(context.coordinator, name: "signOut")
+        configuration.userContentController.add(context.coordinator, name: "authState")
+
+        // Create webView after configuration is fully prepared
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.bounces = false
         webView.scrollView.contentInsetAdjustmentBehavior = .always
-        
-        // Enable file uploads
-        webView.configuration.userContentController.add(context.coordinator, name: "fileUpload")
-        
-        // Add message handler for sign-out
-        webView.configuration.userContentController.add(context.coordinator, name: "signOut")
         
         // Load the URL
         let request = URLRequest(url: url)
@@ -78,6 +129,14 @@ struct WebView: UIViewRepresentable {
                 DispatchQueue.main.async {
                     SupabaseManager.shared.signOut()
                 }
+            } else if message.name == "authState" {
+                if let dict = message.body as? [String: Any],
+                   let accessToken = dict["access_token"] as? String,
+                   let refreshToken = dict["refresh_token"] as? String {
+                    DispatchQueue.main.async {
+                        SupabaseManager.shared.updateTokensFromWeb(accessToken: accessToken, refreshToken: refreshToken)
+                    }
+                }
             }
         }
         
@@ -105,9 +164,8 @@ struct WebView: UIViewRepresentable {
 
                 
                     // Only redirect to AuthView if we're actually on a signin/signup page
-                    // or if we're on the home page (which happens after sign-out)
                     // and not on a redirect or callback page
-                    if ((path.contains("/auth/signin") || path.contains("/auth/signup") || path == "/") && 
+                    if ((path.contains("/auth/signin") || path.contains("/auth/signup")) && 
                        !path.contains("/auth/callback") && 
                        !path.contains("/auth/native-handoff")) {
                         SupabaseManager.shared.isAuthenticated = false
@@ -143,7 +201,6 @@ struct WebView: UIViewRepresentable {
             // Check if the web app is trying to redirect to signin/signup pages
             let path = url.path
             // Only redirect to AuthView if we're actually navigating to a signin/signup page
-            // or to the home page (which happens after sign-out)
             // and not to a redirect or callback page
             if ((path.contains("/auth/signin") || path.contains("/auth/signup") || path == "/") && 
                !path.contains("/auth/callback") && 

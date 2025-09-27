@@ -15,7 +15,13 @@ struct ContentView: View {
     
     var body: some View {
         Group {
-            if supabaseManager.isAuthenticated {
+            if supabaseManager.isInitializing {
+                // Hold initial render until auth restoration completes
+                ZStack {
+                    Color(red: 1.0, green: 0.957, blue: 0.914).ignoresSafeArea()
+                    ProgressView().scaleEffect(1.2)
+                }
+            } else if supabaseManager.isAuthenticated {
                 WebViewContainer(url: webViewURL ?? URL(string: "\(Configuration.webAppURL)/dashboard")!)
             } else if supabaseManager.requiresEmailConfirmation {
                 EmailConfirmationView()

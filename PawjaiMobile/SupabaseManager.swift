@@ -18,6 +18,7 @@ class SupabaseManager: NSObject, ObservableObject {
     @Published var errorMessage: String?
     @Published var requiresEmailConfirmation = false
     @Published var pendingEmailConfirmation: String?
+    @Published var isInitializing = true
     
     private let supabaseURL: URL
     private let supabaseAnonKey: String
@@ -46,48 +47,93 @@ class SupabaseManager: NSObject, ObservableObject {
         // Check for stored authentication tokens
         if let storedUser = loadStoredUser() {
             print("🔐 Found stored user, checking token validity...")
-            // Check if tokens are still valid (not expired)
+            // If access token is fresh, validate account and proceed
             if isTokenValid(user: storedUser) {
-                // Validate account status with server before setting as authenticated
                 validateAccountStatus(user: storedUser) { [weak self] isValid in
                     DispatchQueue.main.async {
                         if isValid {
                             self?.currentUser = storedUser
                             self?.isAuthenticated = true
                             print("📱 Restored authentication state from storage")
-                            
-                            // Start periodic validation
                             self?.startPeriodicValidation()
-                            
-                            // Force UI update and notify ContentView to load dashboard
                             self?.objectWillChange.send()
-                            let dashboardURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
-                            NotificationCenter.default.post(
-                                name: .navigateToURL,
-                                object: nil,
-                                userInfo: ["url": dashboardURL]
-                            )
-                            print("📱 Posted navigateToURL notification for restored auth state")
+                            // Navigate to native handoff to establish web session from native tokens
+                            var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
+                            handoffComponents.queryItems = [
+                                URLQueryItem(name: "access_token", value: storedUser.accessToken),
+                                URLQueryItem(name: "refresh_token", value: storedUser.refreshToken)
+                            ]
+                            if let handoffURL = handoffComponents.url {
+                                NotificationCenter.default.post(
+                                    name: .navigateToURL,
+                                    object: nil,
+                                    userInfo: ["url": handoffURL]
+                                )
+                                print("📱 Posted navigateToURL (handoff) for restored auth state")
+                            }
                         } else {
-                            // Account is deactivated or invalid, clear storage
+                            // Account invalid
                             self?.clearStoredTokens()
                             self?.isAuthenticated = false
                             self?.currentUser = nil
                             print("📱 Account validation failed, clearing authentication state")
                         }
+                        self?.isInitializing = false
                     }
                 }
             } else {
-                // Tokens expired, clear storage
-                clearStoredTokens()
-                self.isAuthenticated = false
-                self.currentUser = nil
-                print("📱 Stored tokens expired, clearing authentication state")
+                // Access token likely expired; try to refresh before deciding
+                refreshAccessToken { [weak self] success in
+                    guard let self = self else { return }
+                    if success, let refreshedUser = self.loadStoredUser() {
+                        self.validateAccountStatus(user: refreshedUser) { [weak self] isValid in
+                            DispatchQueue.main.async {
+                                if isValid {
+                                    self?.currentUser = refreshedUser
+                                    self?.isAuthenticated = true
+                                    print("📱 Token refreshed on launch; restored authentication state")
+                                    self?.startPeriodicValidation()
+                                    self?.objectWillChange.send()
+                                    // Navigate to native handoff to establish web session from refreshed tokens
+                                    var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
+                                    handoffComponents.queryItems = [
+                                        URLQueryItem(name: "access_token", value: refreshedUser.accessToken),
+                                        URLQueryItem(name: "refresh_token", value: refreshedUser.refreshToken)
+                                    ]
+                                    if let handoffURL = handoffComponents.url {
+                                        NotificationCenter.default.post(
+                                            name: .navigateToURL,
+                                            object: nil,
+                                            userInfo: ["url": handoffURL]
+                                        )
+                                        print("📱 Posted navigateToURL (handoff) after refresh")
+                                    }
+                                } else {
+                                    self?.clearStoredTokens()
+                                    self?.isAuthenticated = false
+                                    self?.currentUser = nil
+                                    print("📱 Account invalid after refresh; cleared authentication state")
+                                }
+                                self?.isInitializing = false
+                            }
+                        }
+                    } else {
+                        // Refresh failed; keep user signed out but do not clear unnecessarily
+                        DispatchQueue.main.async {
+                            self.clearStoredTokens()
+                            self.isAuthenticated = false
+                            self.currentUser = nil
+                            print("📱 Token refresh failed on launch; cleared authentication state")
+                            self.isInitializing = false
+                        }
+                    }
+                }
             }
         } else {
             self.isAuthenticated = false
             self.currentUser = nil
             print("📱 No stored authentication found, showing AuthView")
+            self.isInitializing = false
         }
         
         print("🔐 Authentication state check complete - isAuthenticated: \(self.isAuthenticated)")
@@ -119,22 +165,9 @@ class SupabaseManager: NSObject, ObservableObject {
         }
         
         let tokenAge = Date().timeIntervalSince1970 - timestamp
-        // Consider tokens valid for 1 hour (3600 seconds) to allow for refresh
-        let isTimeValid = tokenAge < 3600
-        
-        if !isTimeValid {
-            // Try to refresh the token before considering it invalid
-            refreshAccessToken { [weak self] success in
-                if !success {
-                    DispatchQueue.main.async {
-                        self?.signOut()
-                    }
-                }
-            }
-            return false
-        }
-        
-        return true
+        // Consider access token fresh for 55 minutes to proactively refresh before expiry
+        // This avoids logging out immediately on app relaunch after 1h
+        return tokenAge < 3300
     }
     
     private func clearStoredTokens() {
@@ -176,45 +209,38 @@ class SupabaseManager: NSObject, ObservableObject {
         }
         
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    print("📱 Token refresh error: \(error.localizedDescription)")
-                    completion(false)
-                    return
-                }
-                
-                guard let data = data else {
-                    print("📱 No data received from token refresh")
-                    completion(false)
-                    return
-                }
-                
-                do {
-                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        if let accessToken = json["access_token"] as? String,
-                           let refreshToken = json["refresh_token"] as? String {
-                            
-                            print("📱 Token refresh successful")
-                            
-                            // Save new tokens
-                            self?.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
-                            
-                            // Update current user
-                            self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
-                            
-                            completion(true)
-                        } else if let error = json["error"] as? String {
-                            print("📱 Token refresh error from server: \(error)")
-                            completion(false)
-                        } else {
-                            print("📱 Invalid token refresh response")
-                            completion(false)
-                        }
+            // Do not dispatch to main immediately; parse off main thread, switch at end
+            if let error = error {
+                print("📱 Token refresh error: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+            guard let data = data else {
+                print("📱 No data received from token refresh")
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let accessToken = json["access_token"] as? String,
+                       let refreshToken = json["refresh_token"] as? String {
+                        print("📱 Token refresh successful")
+                        self?.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
+                        self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+                        DispatchQueue.main.async { completion(true) }
+                    } else if let error = json["error"] as? String {
+                        print("📱 Token refresh error from server: \(error)")
+                        DispatchQueue.main.async { completion(false) }
+                    } else {
+                        print("📱 Invalid token refresh response")
+                        DispatchQueue.main.async { completion(false) }
                     }
-                } catch {
-                    print("📱 Failed to parse token refresh response: \(error)")
-                    completion(false)
+                } else {
+                    DispatchQueue.main.async { completion(false) }
                 }
+            } catch {
+                print("📱 Failed to parse token refresh response: \(error)")
+                DispatchQueue.main.async { completion(false) }
             }
         }.resume()
     }
@@ -233,14 +259,14 @@ class SupabaseManager: NSObject, ObservableObject {
         
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
-                print("📱 Account validation error: \(error.localizedDescription)")
-                completion(false)
+                print("📱 Account validation error: \(error.localizedDescription). Treating as valid (lenient)")
+                completion(true)
                 return
             }
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("📱 Invalid response from account validation")
-                completion(false)
+                print("📱 Invalid response from account validation. Treating as valid (lenient)")
+                completion(true)
                 return
             }
             
@@ -255,9 +281,9 @@ class SupabaseManager: NSObject, ObservableObject {
                 print("📱 Account validation failed - account is deactivated or unauthorized")
                 completion(false)
             } else {
-                // Other error - assume account is invalid
-                print("📱 Account validation failed with status: \(httpResponse.statusCode)")
-                completion(false)
+                // Other statuses (e.g., 3xx/5xx) - be lenient to avoid logging out on poor connectivity
+                print("📱 Account validation non-401/403 status: \(httpResponse.statusCode). Treating as valid (lenient)")
+                completion(true)
             }
         }.resume()
     }
@@ -1007,6 +1033,20 @@ class SupabaseManager: NSObject, ObservableObject {
         // No need to navigate to URL - ContentView will automatically show AuthView
         // when isAuthenticated becomes false
         print("📱 User signed out, tokens cleared, returning to native AuthView")
+    }
+
+    // Allow WebView to provide tokens from persisted web session
+    func updateTokensFromWeb(accessToken: String, refreshToken: String) {
+        print("📱 Received tokens from WebView authState bridge; updating native state")
+        // Save to Keychain and update state
+        saveTokens(accessToken: accessToken, refreshToken: refreshToken)
+        DispatchQueue.main.async {
+            self.isAuthenticated = true
+            self.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+            self.objectWillChange.send()
+        }
+        // Start periodic validation going forward
+        startPeriodicValidation()
     }
     
     // MARK: - Periodic Account Validation
