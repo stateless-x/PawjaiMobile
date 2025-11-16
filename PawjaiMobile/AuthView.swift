@@ -40,14 +40,10 @@ struct AuthView: View {
             Color(red: 1.0, green: 0.957, blue: 0.914) // #fff4e9
                 .ignoresSafeArea()
                 .onAppear {
-                    print("🔐 AuthView appeared")
-                    print("🔐 SupabaseManager isLoading: \(supabaseManager.isLoading)")
-                    print("🔐 SupabaseManager isAuthenticated: \(supabaseManager.isAuthenticated)")
                 }
                 .onChange(of: supabaseManager.errorMessage) {
                     if let error = supabaseManager.errorMessage {
                         signInError = error
-                        print("🔐 AuthView received error: \(error)")
                     }
                 }
             
@@ -140,24 +136,23 @@ struct AuthView: View {
                                     Text(L("อีเมล", "Email"))
                                         .font(.kanitMedium(size: 14))
                                         .foregroundColor(.black)
-                                    
-                                    ZStack(alignment: .leading) {
-                                        TextField("", text: $email)
-                                            .textFieldStyle(CustomTextFieldStyle())
-                                            .keyboardType(.emailAddress)
-                                            .autocapitalization(.none)
-                                            .disabled(supabaseManager.isLoading)
-                                            .foregroundColor(.black)
-                                        
-                                        if email.isEmpty {
-                                            Text("doggo@pawjai.com")
-                                                .font(.kanitRegular(size: 16))
-                                                .foregroundColor(Color.gray.opacity(0.8))
-                                                .padding(.horizontal, 16)
-                                                .padding(.vertical, 12)
-                                                .allowsHitTesting(false)
-                                        }
-                                    }
+
+                                    CustomTextField(
+                                        text: $email,
+                                        placeholder: "doggo@pawjai.com",
+                                        keyboardType: .emailAddress,
+                                        isDisabled: supabaseManager.isLoading,
+                                        autocapitalizationType: .none
+                                    )
+                                    .frame(height: 44)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    .background(Color.white)
+                                    .cornerRadius(12)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                                    )
                                 }
                                 
                                 // Password field
@@ -170,12 +165,14 @@ struct AuthView: View {
                                         HStack {
                                             if showPassword {
                                                 TextField("", text: $password)
-                                                    .foregroundColor(.black)
+                                                    .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
+                                                    .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
                                             } else {
                                                 SecureField("", text: $password)
-                                                    .foregroundColor(.black)
+                                                    .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
+                                                    .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
                                             }
-                                            
+
                                             Button(action: {
                                                 showPassword.toggle()
                                             }) {
@@ -185,11 +182,11 @@ struct AuthView: View {
                                         }
                                         .textFieldStyle(CustomTextFieldStyle())
                                         .disabled(supabaseManager.isLoading)
-                                        
+
                                         if password.isEmpty {
                                             Text(authMode == .signup ? L("สร้างรหัสผ่านที่ปลอดภัย", "Create a secure password") : L("ใส่รหัสผ่าน", "Enter password"))
                                                 .font(.kanitRegular(size: 16))
-                                                .foregroundColor(Color.gray.opacity(0.8))
+                                                .foregroundColor(Color.gray.opacity(0.5))
                                                 .padding(.horizontal, 16)
                                                 .padding(.vertical, 12)
                                                 .allowsHitTesting(false)
@@ -208,12 +205,14 @@ struct AuthView: View {
                                             HStack {
                                                 if showConfirmPassword {
                                                     TextField("", text: $confirmPassword)
-                                                        .foregroundColor(.black)
+                                                        .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
+                                                        .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
                                                 } else {
                                                     SecureField("", text: $confirmPassword)
-                                                        .foregroundColor(.black)
+                                                        .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
+                                                        .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
                                                 }
-                                                
+
                                                 Button(action: {
                                                     showConfirmPassword.toggle()
                                                 }) {
@@ -223,11 +222,11 @@ struct AuthView: View {
                                             }
                                             .textFieldStyle(CustomTextFieldStyle())
                                             .disabled(supabaseManager.isLoading)
-                                            
+
                                             if confirmPassword.isEmpty {
                                                 Text(L("ยืนยันรหัสผ่าน", "Confirm password"))
                                                     .font(.kanitRegular(size: 16))
-                                                    .foregroundColor(Color.gray.opacity(0.8))
+                                                    .foregroundColor(Color.gray.opacity(0.5))
                                                     .padding(.horizontal, 16)
                                                     .padding(.vertical, 12)
                                                     .allowsHitTesting(false)
@@ -409,17 +408,14 @@ struct AuthView: View {
     }
     
     private func signInWithEmail() {
-        print("📱 AuthView: Starting email sign in")
         supabaseManager.signInWithEmail(email: email, password: password)
     }
     
     private func signUpWithEmail() {
-        print("📱 AuthView: Starting email sign up")
         supabaseManager.signUpWithEmail(email: email, password: password)
     }
     
     private func sendPasswordReset() {
-        print("📱 AuthView: Starting password reset for: \(forgotPasswordEmail)")
         supabaseManager.resetPassword(email: forgotPasswordEmail) { [self] success, error in
             if success {
                 forgotPasswordSuccess = true
@@ -437,6 +433,69 @@ private func L(_ th: String, _ en: String) -> String {
     LanguageManager.shared.t(th, en)
 }
 
+// Custom UITextField wrapper for proper text color control
+struct CustomTextField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var keyboardType: UIKeyboardType = .default
+    var isSecure: Bool = false
+    var isDisabled: Bool = false
+    var autocapitalizationType: UITextAutocapitalizationType = .sentences
+
+    func makeUIView(context: Context) -> UITextField {
+        let textField = UITextField()
+        textField.delegate = context.coordinator
+        textField.placeholder = placeholder
+        textField.keyboardType = keyboardType
+        textField.isSecureTextEntry = isSecure
+        textField.autocapitalizationType = autocapitalizationType
+        textField.autocorrectionType = .no
+
+        // Set text color to dark gray
+        textField.textColor = UIColor(red: 0.118, green: 0.161, blue: 0.235, alpha: 1.0)
+        textField.tintColor = UIColor(red: 0.118, green: 0.161, blue: 0.235, alpha: 1.0)
+
+        // Set placeholder color to gray
+        textField.attributedPlaceholder = NSAttributedString(
+            string: placeholder,
+            attributes: [NSAttributedString.Key.foregroundColor: UIColor.gray.withAlphaComponent(0.5)]
+        )
+
+        // Styling
+        textField.font = UIFont.kanitRegular(size: 16)
+        textField.backgroundColor = .white
+        textField.borderStyle = .none
+
+        return textField
+    }
+
+    func updateUIView(_ uiView: UITextField, context: Context) {
+        uiView.text = text
+        uiView.isEnabled = !isDisabled
+        uiView.isSecureTextEntry = isSecure
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: CustomTextField
+
+        init(_ parent: CustomTextField) {
+            self.parent = parent
+        }
+
+        func textFieldDidChangeSelection(_ textField: UITextField) {
+            parent.text = textField.text ?? ""
+        }
+
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            return true
+        }
+    }
+}
+
 // Custom text field style
 struct CustomTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
@@ -444,8 +503,9 @@ struct CustomTextFieldStyle: TextFieldStyle {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(Color.white)
-            .foregroundColor(.black) // Ensure text is dark/black
-            .accentColor(.black) // Cursor color
+            .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
+            .accentColor(Color(red: 0.118, green: 0.161, blue: 0.235))
+            .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
             .cornerRadius(12)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
@@ -649,27 +709,26 @@ struct ForgotPasswordView: View {
                                     VStack(spacing: 16) {
                                         // Email field
                                         VStack(alignment: .leading, spacing: 8) {
-                                        Text(L("อีเมล", "Email"))
+                                            Text(L("อีเมล", "Email"))
                                                 .font(.kanitMedium(size: 14))
                                                 .foregroundColor(.black)
-                                            
-                                            ZStack(alignment: .leading) {
-                                                TextField("", text: $email)
-                                                    .textFieldStyle(CustomTextFieldStyle())
-                                                    .keyboardType(.emailAddress)
-                                                    .autocapitalization(.none)
-                                                    .disabled(isLoading)
-                                                    .foregroundColor(.black)
-                                                
-                                                if email.isEmpty {
-                                                    Text("doggo@pawjai.com")
-                                                        .font(.kanitRegular(size: 16))
-                                                        .foregroundColor(Color.gray.opacity(0.8))
-                                                        .padding(.horizontal, 16)
-                                                        .padding(.vertical, 12)
-                                                        .allowsHitTesting(false)
-                                                }
-                                            }
+
+                                            CustomTextField(
+                                                text: $email,
+                                                placeholder: "doggo@pawjai.com",
+                                                keyboardType: .emailAddress,
+                                                isDisabled: isLoading,
+                                                autocapitalizationType: .none
+                                            )
+                                            .frame(height: 44)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 12)
+                                            .background(Color.white)
+                                            .cornerRadius(12)
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                                            )
                                         }
                                         
                                         // Error message

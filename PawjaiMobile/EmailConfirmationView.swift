@@ -233,16 +233,13 @@ struct EmailConfirmationView: View {
                 isResending = false
                 
                 if let error = error {
-                    print("📱 Resend confirmation error: \(error.localizedDescription)")
                     return
                 }
                 
                 if let httpResponse = response as? HTTPURLResponse,
                    httpResponse.statusCode == 200 {
-                    print("📱 Confirmation email resent successfully")
                     cooldown = 60 // Reset cooldown
                 } else {
-                    print("📱 Failed to resend confirmation email")
                 }
             }
         }.resume()

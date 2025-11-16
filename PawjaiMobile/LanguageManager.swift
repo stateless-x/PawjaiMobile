@@ -14,6 +14,8 @@ final class LanguageManager: ObservableObject {
     static let shared = LanguageManager()
 
     private let storageKey = "pawjai.language"
+    private var lastSyncDate: Date?
+    private let syncCacheInterval: TimeInterval = 3600 // 1 hour
 
     @Published var language: AppLanguage
 
@@ -49,6 +51,14 @@ final class LanguageManager: ObservableObject {
 
     // MARK: - Backend sync (same priority rules as web)
     func syncWithBackend(accessToken: String) {
+        // Check cache - skip if synced within last hour
+        if let lastSync = lastSyncDate {
+            let timeSinceLastSync = Date().timeIntervalSince(lastSync)
+            if timeSinceLastSync < syncCacheInterval {
+                return
+            }
+        }
+
         let base = Configuration.webAppURL
         let profileURL = URL(string: "\(base)/api/users/profile")!
 
@@ -60,6 +70,10 @@ final class LanguageManager: ObservableObject {
         URLSession.shared.dataTask(with: req) { [weak self] data, response, _ in
             guard let self = self else { return }
             guard let http = response as? HTTPURLResponse, http.statusCode == 200, let data = data else { return }
+
+            // Update sync timestamp on successful fetch
+            self.lastSyncDate = Date()
+
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let success = json["success"] as? Bool, success,

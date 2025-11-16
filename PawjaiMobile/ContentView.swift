@@ -29,14 +29,8 @@ struct ContentView: View {
                 AuthView()
             }
         }
-        .onAppear {
-            print("📱 ContentView body appeared")
-            print("📱 SupabaseManager isAuthenticated: \(supabaseManager.isAuthenticated)")
-            print("📱 WebViewURL: \(webViewURL?.absoluteString ?? "nil")")
-        }
         .onReceive(NotificationCenter.default.publisher(for: .navigateToURL)) { notification in
             if let url = notification.userInfo?["url"] as? URL {
-                print("📱 ContentView received navigateToURL notification: \(url)")
                 webViewURL = url
                 // Ensure authentication state is set
                 if !supabaseManager.isAuthenticated {
@@ -45,28 +39,22 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            print("📱 ContentView appeared - isAuthenticated: \(supabaseManager.isAuthenticated)")
             if supabaseManager.isAuthenticated && webViewURL == nil {
                 webViewURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
-                print("📱 Set WebView URL to dashboard: \(webViewURL?.absoluteString ?? "nil")")
             }
-            // Sync language with backend once authenticated
             if let token = supabaseManager.currentUser?.accessToken {
                 language.syncWithBackend(accessToken: token)
             }
         }
         .onChange(of: supabaseManager.isAuthenticated) {
-            print("📱 Authentication state changed to: \(supabaseManager.isAuthenticated)")
             if supabaseManager.isAuthenticated && webViewURL == nil {
                 webViewURL = URL(string: "\(Configuration.webAppURL)/dashboard")!
-                print("📱 Set WebView URL to dashboard after auth change: \(webViewURL?.absoluteString ?? "nil")")
             }
             
             // Setup notifications when user is authenticated
             if supabaseManager.isAuthenticated {
                 if notificationManager.isAuthorized {
                     notificationManager.scheduleDailyNotification()
-                    print("🔔 Daily notifications scheduled for authenticated user (12:00 PM)")
                 } else {
                     notificationManager.requestNotificationPermission()
                 }

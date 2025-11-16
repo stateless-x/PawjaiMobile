@@ -39,12 +39,13 @@ struct WebView: UIViewRepresentable {
         configuration.allowsAirPlayForMediaPlayback = true
         configuration.allowsPictureInPictureMediaPlayback = true
         
-        // Ensure persistent website data store for cookies/localStorage retention
+        // Ensure persistent website data store for cookie retention
+        // Web app uses cookie-only storage (no localStorage for auth)
         configuration.websiteDataStore = .default()
         
         // Add message handlers on configuration before creating the webView
-        configuration.userContentController.add(context.coordinator, name: "fileUpload")
         configuration.userContentController.add(context.coordinator, name: "signOut")
+        configuration.userContentController.add(context.coordinator, name: "notificationSettingsChanged")
 
         // Create webView after configuration is fully prepared
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -70,7 +71,9 @@ struct WebView: UIViewRepresentable {
     
     class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var parent: WebView
-        
+        private var lastSyncTimestamp: Date?
+        private let syncDebounceInterval: TimeInterval = 300 // 5 minutes
+
         init(_ parent: WebView) {
             self.parent = parent
         }
@@ -80,6 +83,10 @@ struct WebView: UIViewRepresentable {
                 DispatchQueue.main.async {
                     SupabaseManager.shared.signOut()
                 }
+            } else if message.name == "notificationSettingsChanged" {
+                DispatchQueue.main.async {
+                    NotificationManager.shared.forceRefreshNotifications()
+                }
             }
         }
         
@@ -87,34 +94,116 @@ struct WebView: UIViewRepresentable {
             DispatchQueue.main.async {
                 self.parent.isLoading = true
                 self.parent.errorMessage = nil
-                
-                // Ensure we have a valid token before loading
-                SupabaseManager.shared.ensureValidToken { success in
-                    if !success {
-                        print("📱 Token validation failed, user may need to re-authenticate")
-                    }
-                }
+
+                SupabaseManager.shared.ensureValidToken { _ in }
             }
         }
         
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             DispatchQueue.main.async {
                 self.parent.isLoading = false
-                
-                // Check if the loaded page is a signin/signup page
+
+                // Only sync auth storage when necessary (debounced)
+                if self.shouldSyncAuthStorage(url: webView.url) {
+                    self.syncAuthStorage(webView: webView)
+                    self.lastSyncTimestamp = Date()
+                }
+
+                // Detect if WebView navigated to auth pages (session lost)
                 if let url = webView.url {
                     let path = url.path
-
-                
-                    // Only redirect to AuthView if we're actually on a signin/signup page
-                    // and not on a redirect or callback page
-                    if ((path.contains("/auth/signin") || path.contains("/auth/signup")) && 
-                       !path.contains("/auth/callback") && 
+                    if ((path.contains("/auth/signin") || path.contains("/auth/signup")) &&
+                       !path.contains("/auth/callback") &&
                        !path.contains("/auth/native-handoff")) {
                         SupabaseManager.shared.isAuthenticated = false
                     }
                 }
             }
+        }
+
+        private func shouldSyncAuthStorage(url: URL?) -> Bool {
+            guard let url = url else { return false }
+            let path = url.path
+
+            // Always sync after native handoff (setting session from native)
+            if path.contains("/auth/native-handoff") {
+                return true
+            }
+
+            // Always sync on auth callback (OAuth completion)
+            if path.contains("/auth/callback") {
+                return true
+            }
+
+            // Sync if last sync was > 5 minutes ago (e.g., app was backgrounded)
+            if let lastSync = lastSyncTimestamp {
+                return Date().timeIntervalSince(lastSync) > syncDebounceInterval
+            }
+
+            // First load - sync once
+            if lastSyncTimestamp == nil {
+                return true
+            }
+
+            // Skip sync for regular navigation
+            return false
+        }
+        
+        // Bidirectional auth sync: Cookie (primary) ↔ localStorage (fallback)
+        // Ensures resilient auth across cookie clearing and iOS privacy features
+        private func syncAuthStorage(webView: WKWebView) {
+            let syncScript = """
+            (function() {
+                try {
+                    const AUTH_STORAGE_KEY = 'pawjai-auth-storage';
+                    const COOKIE_NAME = 'pawjai-auth-session-pawjai-auth-storage';
+                    const COOKIE_MAX_AGE = 7776000;
+
+                    function getCookieValue(name) {
+                        const cookies = document.cookie.split(';');
+                        for (let cookie of cookies) {
+                            const [cookieName, cookieValue] = cookie.trim().split('=');
+                            if (cookieName === name) {
+                                return decodeURIComponent(cookieValue);
+                            }
+                        }
+                        return null;
+                    }
+
+                    function setCookie(name, value) {
+                        const isSecure = window.location.protocol === 'https:';
+                        const cookieString = name + '=' + encodeURIComponent(value) +
+                            '; max-age=' + COOKIE_MAX_AGE +
+                            '; path=/' +
+                            (isSecure ? '; secure' : '') +
+                            '; samesite=lax';
+                        document.cookie = cookieString;
+                    }
+
+                    // 1. Try cookie first (highest priority)
+                    let authData = getCookieValue(COOKIE_NAME);
+
+                    // 2. Fallback to localStorage if cookie unavailable
+                    if (!authData) {
+                        authData = localStorage.getItem(AUTH_STORAGE_KEY);
+                        if (authData) {
+                            // Restore cookie from localStorage
+                            setCookie(COOKIE_NAME, authData);
+                        }
+                    }
+
+                    // 3. Keep both in sync for redundancy
+                    if (authData) {
+                        localStorage.setItem(AUTH_STORAGE_KEY, authData);
+                        setCookie(COOKIE_NAME, authData);
+                    }
+                } catch (error) {
+                    // Silent failure - auth handled by native layer
+                }
+            })();
+            """
+
+            webView.evaluateJavaScript(syncScript) { _, _ in }
         }
         
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -129,49 +218,74 @@ struct WebView: UIViewRepresentable {
                 decisionHandler(.allow)
                 return
             }
-            
-            // Handle custom URL schemes
+
+            // Custom URL scheme (pawjai://)
             if url.scheme == "pawjai" {
-                if url.host == "signout" {
-                    DispatchQueue.main.async {
-                        SupabaseManager.shared.signOut()
-                    }
-                }
+                handleCustomScheme(url: url)
                 decisionHandler(.cancel)
                 return
             }
-            
-            // Check if the web app is trying to redirect to signin/signup pages
+
             let path = url.path
-            // Only redirect to AuthView if we're actually navigating to a signin/signup page
-            // and not to a redirect or callback page
-            if ((path.contains("/auth/signin") || path.contains("/auth/signup") || path == "/") && 
-               !path.contains("/auth/callback") && 
-               !path.contains("/auth/native-handoff")) {
-                
-                // Redirect to native AuthView by setting authentication to false
-                DispatchQueue.main.async {
-                    SupabaseManager.shared.isAuthenticated = false
-                }
-                
-                decisionHandler(.cancel)
-                return
-            }
-            
-            // Check if user is being redirected to account-disabled page
+
+            // Account disabled - force sign out
             if path.contains("/auth/account-disabled") {
-                print("📱 Account disabled detected, signing out user")
-                // Clear authentication and redirect to AuthView
                 DispatchQueue.main.async {
                     SupabaseManager.shared.signOut()
                 }
-                
                 decisionHandler(.cancel)
                 return
             }
-            
-            // Allow all other navigation actions
+
+            // WebView session lost - attempt recovery from native Keychain
+            // Only intercept if user WAS authenticated but WebView session lost
+            if shouldAttemptSessionRecovery(path: path) {
+                if let user = SupabaseManager.shared.currentUser,
+                   SupabaseManager.shared.isAuthenticated {
+                    // User has native session but WebView lost it - recover
+                    recoverSession(webView: webView, user: user)
+                    decisionHandler(.cancel)
+                    return
+                }
+                // User not authenticated - allow normal navigation (sign in/up)
+                decisionHandler(.allow)
+                return
+            }
+
             decisionHandler(.allow)
+        }
+
+        private func handleCustomScheme(url: URL) {
+            if url.host == "signout" {
+                DispatchQueue.main.async {
+                    SupabaseManager.shared.signOut()
+                }
+            }
+        }
+
+        private func shouldAttemptSessionRecovery(path: String) -> Bool {
+            return ((path.contains("/auth/signin") || path.contains("/auth/signup") || path == "/") &&
+                   !path.contains("/auth/callback") &&
+                   !path.contains("/auth/native-handoff") &&
+                   !path.contains("/auth/forgot-password") &&
+                   !path.contains("/auth/reset-password") &&
+                   !path.contains("/auth/email-confirmation"))
+        }
+
+        private func recoverSession(webView: WKWebView, user: User) {
+            var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
+            handoffComponents.queryItems = [
+                URLQueryItem(name: "access_token", value: user.accessToken),
+                URLQueryItem(name: "refresh_token", value: user.refreshToken)
+            ]
+
+            if let handoffURL = handoffComponents.url {
+                webView.load(URLRequest(url: handoffURL))
+            } else {
+                DispatchQueue.main.async {
+                    SupabaseManager.shared.signOut()
+                }
+            }
         }
         
         // Handle camera and microphone permission requests
@@ -239,40 +353,14 @@ struct WebView: UIViewRepresentable {
                 completion(bothGranted)
             }
         }
-        
-        // Request photo library permission
-        private func requestPhotoLibraryPermission(completion: @escaping (Bool) -> Void) {
-            PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
-                let granted = status == .authorized || status == .limited
-                completion(granted)
-            }
-        }
-        
-        // Check current permission status
-        private func checkCameraPermission() -> Bool {
-            let status = AVCaptureDevice.authorizationStatus(for: .video)
-            return status == .authorized
-        }
-        
-        private func checkMicrophonePermission() -> Bool {
-            let status = AVCaptureDevice.authorizationStatus(for: .audio)
-            return status == .authorized
-        }
-        
-        private func checkPhotoLibraryPermission() -> Bool {
-            let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-            return status == .authorized || status == .limited
-        }
     }
 }
 
 struct WebViewContainer: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var webView: WKWebView?
     @State private var currentURL: URL
-    @StateObject private var supabaseManager = SupabaseManager.shared
-    
+
     init(url: URL) {
         self._currentURL = State(initialValue: url)
     }
@@ -310,10 +398,6 @@ struct WebViewContainer: View {
                     
                     Button("Retry") {
                         self.errorMessage = nil
-                        // Reload the webview
-                        if let webView = webView {
-                            webView.reload()
-                        }
                     }
                     .buttonStyle(.borderedProminent)
                 }

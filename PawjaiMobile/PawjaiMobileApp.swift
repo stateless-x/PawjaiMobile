@@ -11,47 +11,33 @@ import SwiftUI
 struct PawjaiMobileApp: App {
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var language = LanguageManager.shared
-    
+
     init() {
-        print("🚀 PawjaiMobileApp initializing...")
-        
-        // Register fonts
         FontManager.shared.registerFonts()
-        print("✅ Font registration completed")
-        
-        // Setup fonts with error handling
         setupDefaultFonts()
-        
-        // Setup notifications
         NotificationManager.shared.setupNotifications()
-        
-        print("✅ App initialization complete")
     }
-    
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(language)
-                .onAppear {
-                    print("📱 ContentView appeared in WindowGroup")
-                }
         }
     }
-    
+
     private func setupDefaultFonts() {
-        print("🔤 Setting up default fonts...")
-        
-        // Configure UIFont appearance for UIKit components with fallbacks
         let defaultFont = UIFont.kanitRegular(size: 16)
-        print("🔤 Default font: \(defaultFont.fontName)")
-        
-        // Set default font for various UI elements
+        let darkGrayColor = UIColor(red: 0.118, green: 0.161, blue: 0.235, alpha: 1.0)
+
         UILabel.appearance().font = defaultFont
         UITextField.appearance().font = defaultFont
+        UITextField.appearance().textColor = darkGrayColor
+        UITextField.appearance().tintColor = darkGrayColor
         UITextView.appearance().font = defaultFont
+        UITextView.appearance().textColor = darkGrayColor
+        UITextView.appearance().tintColor = darkGrayColor
         UIButton.appearance().titleLabel?.font = defaultFont
-        
-        // Set navigation bar title font
+
         let navBarAppearance = UINavigationBarAppearance()
         navBarAppearance.titleTextAttributes = [
             .font: UIFont.kanitMedium(size: 18),
@@ -61,11 +47,9 @@ struct PawjaiMobileApp: App {
             .font: UIFont.kanitBold(size: 28),
             .foregroundColor: UIColor.black
         ]
-        
+
         UINavigationBar.appearance().standardAppearance = navBarAppearance
         UINavigationBar.appearance().compactAppearance = navBarAppearance
         UINavigationBar.appearance().scrollEdgeAppearance = navBarAppearance
-        
-        print("✅ Default fonts setup complete")
     }
 }

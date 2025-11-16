@@ -7,115 +7,224 @@
 
 import UserNotifications
 import Foundation
+import UIKit
 
 class NotificationManager: ObservableObject {
     static let shared = NotificationManager()
-    
+
     @Published var isAuthorized = false
-    
-    private init() {}
-    
-    // MARK: - Permission Request
+
+    private var lastRefreshDate: Date?
+    private let minimumRefreshInterval: TimeInterval = 43200 // 12 hours
+
+    private init() {
+        setupAppLifecycleObservers()
+    }
+
+    private func setupAppLifecycleObservers() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleAppWillEnterForeground() {
+        refreshNotificationSettings(force: false)
+    }
+
+    private func refreshNotificationSettings(force: Bool = false) {
+        guard isAuthorized else { return }
+
+        if !force, let lastRefresh = lastRefreshDate {
+            let timeSinceLastRefresh = Date().timeIntervalSince(lastRefresh)
+            if timeSinceLastRefresh < minimumRefreshInterval {
+                return
+            }
+        }
+
+        lastRefreshDate = Date()
+        scheduleDailyNotification()
+    }
+
+    // Bypass debouncing for user-initiated changes
+    func forceRefreshNotifications() {
+        refreshNotificationSettings(force: true)
+    }
+
     func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { [weak self] granted, error in
             DispatchQueue.main.async {
                 self?.isAuthorized = granted
-                print("🔔 Notification permission granted: \(granted)")
-                if let error = error {
-                    print("❌ Notification permission error: \(error.localizedDescription)")
-                } else if granted {
-                    // Schedule daily notification after permission is granted
+                if granted {
                     self?.scheduleDailyNotification()
-                    print("🔔 Daily notification scheduled after permission granted")
                 }
             }
         }
     }
-    
-    // MARK: - Check Authorization Status
+
     func checkAuthorizationStatus() {
         UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
             DispatchQueue.main.async {
                 self?.isAuthorized = settings.authorizationStatus == .authorized
-                print("🔔 Current notification authorization status: \(settings.authorizationStatus.rawValue)")
             }
         }
     }
-    
-    // MARK: - Schedule Daily Notifications
+
     func scheduleDailyNotification() {
-        // Remove existing notifications first
         removeAllNotifications()
+
+        fetchNotificationSettings { [weak self] settings, enabled in
+            guard let self = self else { return }
+            guard enabled else { return }
+
+            // Stagger notifications by 1 minute to avoid iOS grouping
+            for (index, setting) in settings.enumerated() {
+                let adjustedMinute = (setting.minute + index) % 60
+                let adjustedHour = setting.hour + ((setting.minute + index) / 60)
+
+                self.scheduleNotification(
+                    identifier: setting.identifier,
+                    title: setting.title,
+                    body: setting.body,
+                    hour: adjustedHour,
+                    minute: adjustedMinute,
+                    badgeCount: index + 1
+                )
+            }
+        }
+    }
+
+    private func fetchNotificationSettings(completion: @escaping ([NotificationSetting], Bool) -> Void) {
+        let preferredLanguage = Locale.current.language.languageCode?.identifier ?? "th"
+        let language = (preferredLanguage == "en") ? "en" : "th"
+
+        let baseURL = Configuration.backendApiURL
+        guard var urlComponents = URLComponents(string: "\(baseURL)/api/notifications/settings") else {
+            completion([], false)
+            return
+        }
+
+        urlComponents.queryItems = [URLQueryItem(name: "language", value: language)]
+
+        guard let url = urlComponents.url else {
+            completion([], false)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        if let accessToken = SupabaseManager.shared.currentUser?.accessToken {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
         
-        // Schedule morning notification at 10:00 AM
-        scheduleNotification(
-            identifier: "daily-pet-reminder-morning",
-            title: "วันนี้อย่าลืมมาจดบันทึกให้น้องน้าาาา~",
-            body: "น้องดูแลตัวเองไม่ดีเท่าที่เราคอยช่วยดูแลเค้านะ 🧡",
-            hour: 10,
-            minute: 0
-        )
-        
-        // Schedule evening notification at 7:00 PM
-        scheduleNotification(
-            identifier: "daily-pet-reminder-evening",
-            title: "เย็นแล้ว! วันนี้ดูแลน้องยังไงบ้าง?",
-            body: "อย่าลืมมาจดบันทึกกิจกรรมของน้องวันนี้กันนะ 🧡",
-            hour: 19,
-            minute: 0
-        )
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                DispatchQueue.main.async {
+                    completion([], false)
+                }
+                return
+            }
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                DispatchQueue.main.async {
+                    completion([], false)
+                }
+                return
+            }
+
+            guard let data = data else {
+                DispatchQueue.main.async {
+                    completion([], false)
+                }
+                return
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                DispatchQueue.main.async {
+                    completion([], false)
+                }
+                return
+            }
+            
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let success = json["success"] as? Bool, success,
+                   let dataDict = json["data"] as? [String: Any],
+                   let enabled = dataDict["enabled"] as? Bool,
+                   let settingsArray = dataDict["settings"] as? [[String: Any]] {
+
+                    let settings = settingsArray.compactMap { dict -> NotificationSetting? in
+                        guard let identifier = dict["identifier"] as? String,
+                              let title = dict["title"] as? String,
+                              let body = dict["body"] as? String,
+                              let hour = dict["hour"] as? Int,
+                              let minute = dict["minute"] as? Int else {
+                            return nil
+                        }
+                        return NotificationSetting(
+                            identifier: identifier,
+                            title: title,
+                            body: body,
+                            hour: hour,
+                            minute: minute
+                        )
+                    }
+
+                    DispatchQueue.main.async {
+                        completion(settings, enabled)
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        completion([], false)
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    completion([], false)
+                }
+            }
+        }.resume()
     }
     
-    // MARK: - Helper method to schedule individual notification
-    private func scheduleNotification(identifier: String, title: String, body: String, hour: Int, minute: Int) {
-        // Create notification content
+    private struct NotificationSetting {
+        let identifier: String
+        let title: String
+        let body: String
+        let hour: Int
+        let minute: Int
+    }
+
+    private func scheduleNotification(identifier: String, title: String, body: String, hour: Int, minute: Int, badgeCount: Int = 1) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
-        content.badge = 1
-        
-        // Create trigger for daily at specified time
+        content.badge = NSNumber(value: badgeCount)
+
         var dateComponents = DateComponents()
         dateComponents.hour = hour
         dateComponents.minute = minute
-        
+
         let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
-        
-        // Create request
-        let request = UNNotificationRequest(
-            identifier: identifier,
-            content: content,
-            trigger: trigger
-        )
-        
-        // Add notification request
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error = error {
-                print("❌ Failed to schedule \(identifier): \(error.localizedDescription)")
-            } else {
-                let timeString = String(format: "%02d:%02d", hour, minute)
-                print("✅ Notification '\(identifier)' scheduled successfully for \(timeString)")
-            }
-        }
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+
+        UNUserNotificationCenter.current().add(request) { _ in }
     }
-    
-    
-    // MARK: - Remove All Notifications
+
     func removeAllNotifications() {
         UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-        print("🗑️ All notifications removed")
     }
-    
-    // MARK: - Remove Specific Notification
+
     func removeNotification(withIdentifier identifier: String) {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [identifier])
-        print("🗑️ Notification with identifier '\(identifier)' removed")
     }
-    
-    // MARK: - Get Pending Notifications
+
     func getPendingNotifications(completion: @escaping ([UNNotificationRequest]) -> Void) {
         UNUserNotificationCenter.current().getPendingNotificationRequests { requests in
             DispatchQueue.main.async {
@@ -123,11 +232,10 @@ class NotificationManager: ObservableObject {
             }
         }
     }
-    
-    // MARK: - Setup Notifications
+
     func setupNotifications() {
         checkAuthorizationStatus()
-        
+
         if isAuthorized {
             scheduleDailyNotification()
         } else {
