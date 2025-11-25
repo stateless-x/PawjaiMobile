@@ -16,6 +16,9 @@ struct PawjaiMobileApp: App {
         FontManager.shared.registerFonts()
         setupDefaultFonts()
         NotificationManager.shared.setupNotifications()
+
+        // Fetch latest external domains from backend
+        ExternalDomainsManager.shared.fetchDomains()
     }
 
     var body: some Scene {
