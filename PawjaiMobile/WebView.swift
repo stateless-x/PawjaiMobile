@@ -229,17 +229,8 @@ struct WebView: UIViewRepresentable {
             // Detect external e-commerce links and open in Safari
             // This prevents ads from opening in the in-app WebView
             // Dynamically fetched from backend API
-            let urlHost = url.host ?? "nil"
-            let shouldOpen = ExternalDomainsManager.shared.shouldOpenInSafari(host: url.host)
-            let currentDomains = ExternalDomainsManager.shared.getDomains()
-            print("🔍 Navigation check - URL: \(url.absoluteString)")
-            print("🔍 Host: \(urlHost)")
-            print("🔍 Configured domains: \(currentDomains)")
-            print("🔍 Should open in Safari: \(shouldOpen)")
-
-            if shouldOpen {
+            if ExternalDomainsManager.shared.shouldOpenInSafari(host: url.host) {
                 // Open external link in Safari
-                print("✅ Opening in Safari: \(url.absoluteString)")
                 DispatchQueue.main.async {
                     UIApplication.shared.open(url, options: [:], completionHandler: nil)
                 }
