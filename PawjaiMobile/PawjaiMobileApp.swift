@@ -7,10 +7,67 @@
 
 import SwiftUI
 
+// Class to hold mutable state for URL handling
+class URLHandler: ObservableObject {
+    static let shared = URLHandler()
+    private var lastHandledURL: String = ""
+
+    func handleIncomingURL(_ url: URL) {
+        // Prevent handling the same URL multiple times (debounce)
+        let urlString = url.absoluteString
+        if urlString == lastHandledURL {
+            return
+        }
+        lastHandledURL = urlString
+
+        // Handle custom URL scheme (pawjai://)
+        // This is used by the bridge page to force the app to open
+        if url.scheme == "pawjai" {
+            // Convert pawjai:// URL to https:// URL for the WebView
+            // Example: pawjai://auth/callback?token=... → https://pawjai.co/auth/callback?token=...
+            let path = url.path
+            let query = url.query.map { "?\($0)" } ?? ""
+            let fragment = url.fragment.map { "#\($0)" } ?? ""
+            let httpsUrlString = "https://pawjai.co\(path)\(query)\(fragment)"
+
+            // Navigate the WebView to this URL
+            if let httpsUrl = URL(string: httpsUrlString) {
+                NotificationCenter.default.post(
+                    name: .navigateToURL,
+                    object: nil,
+                    userInfo: ["url": httpsUrl]
+                )
+
+                // Reset after 2 seconds to allow future navigations
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.lastHandledURL = ""
+                }
+            }
+            return
+        }
+
+        // Handle Universal Links (https://pawjai.co/...)
+        // Example: https://pawjai.co/auth/callback?type=signup&...
+        if url.host == "pawjai.co" {
+            NotificationCenter.default.post(
+                name: .navigateToURL,
+                object: nil,
+                userInfo: ["url": url]
+            )
+
+            // Reset after 2 seconds
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                self.lastHandledURL = ""
+            }
+        }
+    }
+}
+
 @main
 struct PawjaiMobileApp: App {
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var language = LanguageManager.shared
+    @StateObject private var urlHandler = URLHandler.shared
 
     init() {
         FontManager.shared.registerFonts()
@@ -25,6 +82,9 @@ struct PawjaiMobileApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(language)
+                .onOpenURL { url in
+                    urlHandler.handleIncomingURL(url)
+                }
         }
     }
 

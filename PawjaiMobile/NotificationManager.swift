@@ -122,7 +122,7 @@ class NotificationManager: ObservableObject {
         }
         
         URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
+            if error != nil {
                 DispatchQueue.main.async {
                     completion([], false)
                 }

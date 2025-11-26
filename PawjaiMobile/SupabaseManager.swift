@@ -261,7 +261,7 @@ class SupabaseManager: NSObject, ObservableObject {
             }
 
             // Do not dispatch to main immediately; parse off main thread, switch at end
-            if let error = error {
+            if error != nil {
                 finishRefresh(false)
                 return
             }
@@ -276,7 +276,7 @@ class SupabaseManager: NSObject, ObservableObject {
                         self?.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
                         self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
                         finishRefresh(true)
-                    } else if let error = json["error"] as? String {
+                    } else if json["error"] != nil {
                         finishRefresh(false)
                     } else {
                         finishRefresh(false)
@@ -302,7 +302,7 @@ class SupabaseManager: NSObject, ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
         URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
+            if error != nil {
                 completion(true)
                 return
             }
@@ -673,7 +673,8 @@ class SupabaseManager: NSObject, ObservableObject {
                 // Check HTTP status code
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode != 200 {
-                        if let data = data, let errorString = String(data: data, encoding: .utf8) {
+                        if let data = data, let _ = String(data: data, encoding: .utf8) {
+                            // Error logged but not used
                         }
                     }
                 }
@@ -773,7 +774,8 @@ class SupabaseManager: NSObject, ObservableObject {
                 // Check HTTP status code
                 if let httpResponse = response as? HTTPURLResponse {
                     if httpResponse.statusCode != 200 {
-                        if let data = data, let errorString = String(data: data, encoding: .utf8) {
+                        if let data = data, let _ = String(data: data, encoding: .utf8) {
+                            // Error logged but not used
                         }
                     }
                 }
@@ -785,11 +787,12 @@ class SupabaseManager: NSObject, ObservableObject {
                 
                 do {
                     if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                        
+
                         // Check if user exists in response
-                        if let user = json["user"] as? [String: Any] {
+                        if json["user"] != nil {
+                            // User data exists in response
                         }
-                        
+
                         if let accessToken = json["access_token"] as? String,
                            let refreshToken = json["refresh_token"] as? String {
                             
@@ -895,7 +898,8 @@ class SupabaseManager: NSObject, ObservableObject {
                         completion(true, nil)
                         return
                     } else if httpResponse.statusCode != 200 {
-                        if let data = data, let errorString = String(data: data, encoding: .utf8) {
+                        if let data = data, let _ = String(data: data, encoding: .utf8) {
+                            // Error logged but not used
                         }
                     }
                 }

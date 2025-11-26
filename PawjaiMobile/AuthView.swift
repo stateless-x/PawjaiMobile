@@ -25,6 +25,15 @@ struct AuthView: View {
     @State private var forgotPasswordEmail = ""
     @State private var forgotPasswordError = ""
     @State private var forgotPasswordSuccess = false
+
+    // Cache translated strings to avoid repeated lookups
+    private var titleText: String {
+        authMode == .signin ? L("ใส่ใจน้องมากขึ้นทุกวัน", "Care More for Your Pet") : L("เริ่มต้นดูแลน้องให้ดียิ่งขึ้น", "Start caring for your pet better")
+    }
+
+    private var subtitleText: String {
+        L("สุขภาพน้องดี คนในบ้านก็อุ่นใจ", "Healthy pets, Happy family")
+    }
     
     enum AuthMode {
         case oauth, email
@@ -65,12 +74,12 @@ struct AuthView: View {
                         
                         // Title and subtitle
                         VStack(spacing: 8) {
-                            Text(getTitle())
+                            Text(titleText)
                                 .font(.kanitBold(size: 24))
                                 .foregroundColor(.black)
                                 .multilineTextAlignment(.center)
-                            
-                            Text(getSubtitle())
+
+                            Text(subtitleText)
                                 .font(.kanitRegular(size: 18))
                                 .foregroundColor(.black.opacity(0.7))
                                 .multilineTextAlignment(.center)
@@ -85,10 +94,10 @@ struct AuthView: View {
                             // OAuth mode
                             VStack(spacing: 16) {
                                 // Google Sign In Button
-                                GoogleSignInButton(authMode: authMode)
-                                
+                                GoogleSignInButton(supabaseManager: supabaseManager, authMode: authMode)
+
                                 // Apple Sign In Button
-                                AppleSignInButton(authMode: authMode)
+                                AppleSignInButton(supabaseManager: supabaseManager, authMode: authMode)
                                 
                                 // OR separator
                                 OrSeparator()
@@ -144,6 +153,7 @@ struct AuthView: View {
                                         isDisabled: supabaseManager.isLoading,
                                         autocapitalizationType: .none
                                     )
+                                    .id("email-field")
                                     .frame(height: 44)
                                     .padding(.horizontal, 16)
                                     .padding(.vertical, 12)
@@ -160,38 +170,33 @@ struct AuthView: View {
                                     Text(L("รหัสผ่าน", "Password"))
                                         .font(.kanitMedium(size: 14))
                                         .foregroundColor(.black)
-                                    
-                                    ZStack(alignment: .leading) {
-                                        HStack {
+
+                                    HStack {
+                                        Group {
                                             if showPassword {
-                                                TextField("", text: $password)
-                                                    .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
-                                                    .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
+                                                TextField(authMode == .signup ? L("สร้างรหัสผ่านที่ปลอดภัย", "Create a secure password") : L("ใส่รหัสผ่าน", "Enter password"), text: $password)
+                                                    .id("password-visible")
                                             } else {
-                                                SecureField("", text: $password)
-                                                    .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
-                                                    .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
-                                            }
-
-                                            Button(action: {
-                                                showPassword.toggle()
-                                            }) {
-                                                Image(systemName: showPassword ? "eye.slash" : "eye")
-                                                    .foregroundColor(.black.opacity(0.6))
+                                                SecureField(authMode == .signup ? L("สร้างรหัสผ่านที่ปลอดภัย", "Create a secure password") : L("ใส่รหัสผ่าน", "Enter password"), text: $password)
+                                                    .id("password-secure")
                                             }
                                         }
-                                        .textFieldStyle(CustomTextFieldStyle())
-                                        .disabled(supabaseManager.isLoading)
+                                        .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
+                                        .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
+                                        .autocorrectionDisabled()
+                                        .textInputAutocapitalization(.never)
 
-                                        if password.isEmpty {
-                                            Text(authMode == .signup ? L("สร้างรหัสผ่านที่ปลอดภัย", "Create a secure password") : L("ใส่รหัสผ่าน", "Enter password"))
-                                                .font(.kanitRegular(size: 16))
-                                                .foregroundColor(Color.gray.opacity(0.5))
-                                                .padding(.horizontal, 16)
-                                                .padding(.vertical, 12)
-                                                .allowsHitTesting(false)
+                                        Button(action: {
+                                            showPassword.toggle()
+                                        }) {
+                                            Image(systemName: showPassword ? "eye.slash" : "eye")
+                                                .foregroundColor(.black.opacity(0.6))
+                                                .frame(width: 24, height: 24)
                                         }
+                                        .buttonStyle(.plain)
                                     }
+                                    .textFieldStyle(CustomTextFieldStyle())
+                                    .disabled(supabaseManager.isLoading)
                                 }
                                 
                                 // Confirm Password field (only for signup)
@@ -200,38 +205,33 @@ struct AuthView: View {
                                         Text(L("ยืนยันรหัสผ่าน", "Confirm password"))
                                             .font(.kanitMedium(size: 14))
                                             .foregroundColor(.black)
-                                        
-                                        ZStack(alignment: .leading) {
-                                            HStack {
+
+                                        HStack {
+                                            Group {
                                                 if showConfirmPassword {
-                                                    TextField("", text: $confirmPassword)
-                                                        .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
-                                                        .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
+                                                    TextField(L("ยืนยันรหัสผ่าน", "Confirm password"), text: $confirmPassword)
+                                                        .id("confirm-password-visible")
                                                 } else {
-                                                    SecureField("", text: $confirmPassword)
-                                                        .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
-                                                        .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
-                                                }
-
-                                                Button(action: {
-                                                    showConfirmPassword.toggle()
-                                                }) {
-                                                    Image(systemName: showConfirmPassword ? "eye.slash" : "eye")
-                                                        .foregroundColor(.black.opacity(0.6))
+                                                    SecureField(L("ยืนยันรหัสผ่าน", "Confirm password"), text: $confirmPassword)
+                                                        .id("confirm-password-secure")
                                                 }
                                             }
-                                            .textFieldStyle(CustomTextFieldStyle())
-                                            .disabled(supabaseManager.isLoading)
+                                            .foregroundColor(Color(red: 0.118, green: 0.161, blue: 0.235))
+                                            .tint(Color(red: 0.118, green: 0.161, blue: 0.235))
+                                            .autocorrectionDisabled()
+                                            .textInputAutocapitalization(.never)
 
-                                            if confirmPassword.isEmpty {
-                                                Text(L("ยืนยันรหัสผ่าน", "Confirm password"))
-                                                    .font(.kanitRegular(size: 16))
-                                                    .foregroundColor(Color.gray.opacity(0.5))
-                                                    .padding(.horizontal, 16)
-                                                    .padding(.vertical, 12)
-                                                    .allowsHitTesting(false)
+                                            Button(action: {
+                                                showConfirmPassword.toggle()
+                                            }) {
+                                                Image(systemName: showConfirmPassword ? "eye.slash" : "eye")
+                                                    .foregroundColor(.black.opacity(0.6))
+                                                    .frame(width: 24, height: 24)
                                             }
+                                            .buttonStyle(.plain)
                                         }
+                                        .textFieldStyle(CustomTextFieldStyle())
+                                        .disabled(supabaseManager.isLoading)
                                     }
                                 }
                                 
@@ -380,14 +380,6 @@ struct AuthView: View {
         }
     }
     
-    private func getTitle() -> String {
-        return authMode == .signin ? L("ใส่ใจน้องมากขึ้นทุกวัน", "Care More for Your Pet") : L("เริ่มต้นดูแลน้องให้ดียิ่งขึ้น", "Start caring for your pet better")
-    }
-    
-    private func getSubtitle() -> String {
-        return L("สุขภาพน้องดี คนในบ้านก็อุ่นใจ", "Healthy pets, Happy family")
-    }
-    
     private func handleEmailAuth() {
         // Clear previous errors
         signInError = ""
@@ -466,13 +458,24 @@ struct CustomTextField: UIViewRepresentable {
         textField.backgroundColor = .white
         textField.borderStyle = .none
 
+        // Performance optimizations
+        textField.clearButtonMode = .never // Disable clear button to reduce complexity
+        textField.enablesReturnKeyAutomatically = false
+
         return textField
     }
 
     func updateUIView(_ uiView: UITextField, context: Context) {
-        uiView.text = text
-        uiView.isEnabled = !isDisabled
-        uiView.isSecureTextEntry = isSecure
+        // Only update if values actually changed to prevent unnecessary re-renders
+        if uiView.text != text {
+            uiView.text = text
+        }
+        if uiView.isEnabled == isDisabled {
+            uiView.isEnabled = !isDisabled
+        }
+        if uiView.isSecureTextEntry != isSecure {
+            uiView.isSecureTextEntry = isSecure
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -487,10 +490,17 @@ struct CustomTextField: UIViewRepresentable {
         }
 
         func textFieldDidChangeSelection(_ textField: UITextField) {
-            parent.text = textField.text ?? ""
+            // Use DispatchQueue.main.async to prevent blocking the main thread
+            DispatchQueue.main.async {
+                self.parent.text = textField.text ?? ""
+            }
         }
 
         func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            return true
+        }
+
+        func textFieldShouldBeginEditing(_ textField: UITextField) -> Bool {
             return true
         }
     }
@@ -536,9 +546,9 @@ struct PlaceholderStyle: ViewModifier {
 // Google Sign In Button
 struct GoogleSignInButton: View {
     @EnvironmentObject var language: LanguageManager
-    @StateObject private var supabaseManager = SupabaseManager.shared
+    let supabaseManager: SupabaseManager
     let authMode: AuthView.AuthModeType
-    
+
     var body: some View {
         Button(action: {
             supabaseManager.signInWithGoogle()
@@ -567,9 +577,9 @@ struct GoogleSignInButton: View {
 // Apple Sign In Button
 struct AppleSignInButton: View {
     @EnvironmentObject var language: LanguageManager
-    @StateObject private var supabaseManager = SupabaseManager.shared
+    let supabaseManager: SupabaseManager
     let authMode: AuthView.AuthModeType
-    
+
     var body: some View {
         Button(action: {
             supabaseManager.signInWithApple()

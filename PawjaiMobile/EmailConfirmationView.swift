@@ -231,8 +231,8 @@ struct EmailConfirmationView: View {
         URLSession.shared.dataTask(with: request) { data, response, error in
             DispatchQueue.main.async {
                 isResending = false
-                
-                if let error = error {
+
+                if error != nil {
                     return
                 }
                 

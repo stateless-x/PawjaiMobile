@@ -130,9 +130,10 @@ struct WebView: UIViewRepresentable {
                 return true
             }
 
-            // Always sync on auth callback (OAuth completion)
+            // SKIP sync on auth callback - the callback page handles its own auth flow
+            // and JavaScript injection might interfere with token extraction/redirect
             if path.contains("/auth/callback") {
-                return true
+                return false
             }
 
             // Sync if last sync was > 5 minutes ago (e.g., app was backgrounded)

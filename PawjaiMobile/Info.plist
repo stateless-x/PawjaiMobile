@@ -4,6 +4,19 @@
 <dict>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>Pawjai would like to send you daily reminders to log your pet's activities and health records.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>co.pawjai.PawjaiMobile</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>pawjai</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

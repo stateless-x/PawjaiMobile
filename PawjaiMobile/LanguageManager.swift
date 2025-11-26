@@ -26,7 +26,12 @@ final class LanguageManager: ObservableObject {
             return
         }
         // Default by device region/language (TH => th, else en)
-        let region = Locale.current.regionCode?.uppercased()
+        let region: String?
+        if #available(iOS 16, *) {
+            region = Locale.current.region?.identifier.uppercased()
+        } else {
+            region = Locale.current.regionCode?.uppercased()
+        }
         let prefersThai = Locale.preferredLanguages.contains(where: { $0.lowercased().hasPrefix("th") })
         if region == "TH" || prefersThai {
             self.language = .th
