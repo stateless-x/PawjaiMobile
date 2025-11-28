@@ -138,7 +138,24 @@ class SupabaseManager: NSObject, ObservableObject {
         if tokenAge > 3000 {
             attemptTokenRefresh(user: user)
         } else {
+            // Token is fresh, but WebView session might have expired during backgrounding
+            // (iOS suspends JavaScript, so Supabase autoRefreshToken might not have run)
+            // Proactively sync fresh tokens to WebView cookie WITHOUT navigation
+            syncTokensToWebViewCookie(accessToken: user.accessToken, refreshToken: user.refreshToken)
         }
+    }
+
+    private func syncTokensToWebViewCookie(accessToken: String, refreshToken: String) {
+        // Post notification to WebView to inject tokens directly into cookie
+        // This updates the session without navigating away from current page
+        NotificationCenter.default.post(
+            name: .syncWebViewTokens,
+            object: nil,
+            userInfo: [
+                "access_token": accessToken,
+                "refresh_token": refreshToken
+            ]
+        )
     }
 
     private func attemptTokenRefresh(user: User) {
@@ -972,4 +989,5 @@ struct User {
 
 extension Notification.Name {
     static let navigateToURL = Notification.Name("navigateToURL")
+    static let syncWebViewTokens = Notification.Name("syncWebViewTokens")
 }

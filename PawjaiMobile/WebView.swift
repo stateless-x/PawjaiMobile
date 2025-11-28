@@ -73,11 +73,81 @@ struct WebView: UIViewRepresentable {
         var parent: WebView
         private var lastSyncTimestamp: Date?
         private let syncDebounceInterval: TimeInterval = 300 // 5 minutes
+        private weak var webView: WKWebView?
 
         init(_ parent: WebView) {
             self.parent = parent
+            super.init()
+
+            // Listen for token sync notifications from native app
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleSyncTokens(_:)),
+                name: .syncWebViewTokens,
+                object: nil
+            )
         }
-        
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        @objc private func handleSyncTokens(_ notification: Notification) {
+            guard let webView = self.webView,
+                  let userInfo = notification.userInfo,
+                  let accessToken = userInfo["access_token"] as? String,
+                  let refreshToken = userInfo["refresh_token"] as? String else {
+                return
+            }
+
+            // Inject tokens directly into WebView cookie using Supabase session format
+            let expiresAt = Int(Date().timeIntervalSince1970) + 3600 // 1 hour from now
+            let syncScript = """
+            (function() {
+                try {
+                    // Create Supabase session object
+                    const session = {
+                        access_token: '\(accessToken)',
+                        refresh_token: '\(refreshToken)',
+                        expires_at: \(expiresAt),
+                        expires_in: 3600,
+                        token_type: 'bearer'
+                    };
+
+                    // Wrap in the format Supabase expects
+                    const authStorage = {
+                        state: {
+                            session: session,
+                            user: null // Will be populated by Supabase
+                        }
+                    };
+
+                    const cookieValue = JSON.stringify(authStorage);
+                    const cookieName = 'pawjai-auth-session-pawjai-auth-storage';
+                    const maxAge = 31536000; // 1 year
+
+                    document.cookie = cookieName + '=' + encodeURIComponent(cookieValue) +
+                        '; max-age=' + maxAge +
+                        '; path=/' +
+                        (window.location.protocol === 'https:' ? '; secure' : '') +
+                        '; samesite=lax';
+
+                    console.log('[Native→WebView] Tokens synced to cookie');
+                } catch (error) {
+                    console.error('[Native→WebView] Error syncing tokens:', error);
+                }
+            })();
+            """
+
+            webView.evaluateJavaScript(syncScript) { _, error in
+                if let error = error {
+                    print("Error syncing tokens to WebView:", error)
+                } else {
+                    print("✅ Tokens successfully synced to WebView cookie")
+                }
+            }
+        }
+
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             if message.name == "signOut" {
                 DispatchQueue.main.async {
@@ -91,6 +161,9 @@ struct WebView: UIViewRepresentable {
         }
         
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            // Store webView reference for token sync
+            self.webView = webView
+
             DispatchQueue.main.async {
                 self.parent.isLoading = true
                 self.parent.errorMessage = nil
@@ -150,15 +223,16 @@ struct WebView: UIViewRepresentable {
             return false
         }
         
-        // Bidirectional auth sync: Cookie (primary) ↔ localStorage (fallback)
-        // Ensures resilient auth across cookie clearing and iOS privacy features
+        // DEPRECATED: This function is no longer needed
+        // Tokens are now synced proactively from native app via handleSyncTokens()
+        // Supabase client handles token refresh automatically via autoRefreshToken
+        // Keeping this for backwards compatibility, but it only refreshes cookie max-age
         private func syncAuthStorage(webView: WKWebView) {
             let syncScript = """
             (function() {
                 try {
-                    const AUTH_STORAGE_KEY = 'pawjai-auth-storage';
                     const COOKIE_NAME = 'pawjai-auth-session-pawjai-auth-storage';
-                    const COOKIE_MAX_AGE = 7776000;
+                    const COOKIE_MAX_AGE = 31536000; // 365 days (1 year)
 
                     function getCookieValue(name) {
                         const cookies = document.cookie.split(';');
@@ -181,21 +255,10 @@ struct WebView: UIViewRepresentable {
                         document.cookie = cookieString;
                     }
 
-                    // 1. Try cookie first (highest priority)
-                    let authData = getCookieValue(COOKIE_NAME);
-
-                    // 2. Fallback to localStorage if cookie unavailable
-                    if (!authData) {
-                        authData = localStorage.getItem(AUTH_STORAGE_KEY);
-                        if (authData) {
-                            // Restore cookie from localStorage
-                            setCookie(COOKIE_NAME, authData);
-                        }
-                    }
-
-                    // 3. Keep both in sync for redundancy
+                    // Cookie-only storage - check if cookie exists and refresh max-age
+                    const authData = getCookieValue(COOKIE_NAME);
                     if (authData) {
-                        localStorage.setItem(AUTH_STORAGE_KEY, authData);
+                        // Refresh cookie max-age to prevent expiration
                         setCookie(COOKIE_NAME, authData);
                     }
                 } catch (error) {

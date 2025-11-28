@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct EmailConfirmationView: View {
+    @EnvironmentObject var language: LanguageManager
     @StateObject private var supabaseManager = SupabaseManager.shared
     @State private var navigateToWebView = false
     @State private var cooldown = 0
@@ -34,12 +35,12 @@ struct EmailConfirmationView: View {
                         
                         // Title and subtitle
                         VStack(spacing: 8) {
-                            Text("ยืนยันอีเมลของคุณ")
+                            Text(L("ยืนยันอีเมลของคุณ", "Confirm Your Email"))
                                 .font(.kanitBold(size: 24))
                                 .foregroundColor(.black)
                                 .multilineTextAlignment(.center)
-                            
-                            Text("เราได้ส่งลิงก์ยืนยันไปยังอีเมลของคุณแล้ว")
+
+                            Text(L("เราได้ส่งลิงก์ยืนยันไปยังอีเมลของคุณแล้ว", "We've sent a confirmation link to your email"))
                                 .font(.kanitRegular(size: 18))
                                 .foregroundColor(.black.opacity(0.7))
                                 .multilineTextAlignment(.center)
@@ -52,13 +53,13 @@ struct EmailConfirmationView: View {
                         VStack(spacing: 16) {
                             // Instructions
                             VStack(spacing: 12) {
-                                Text("กรุณาตรวจสอบกล่องจดหมายและคลิกลิงก์เพื่อยืนยันการสมัครสมาชิก")
+                                Text(L("กรุณาตรวจสอบกล่องจดหมายและคลิกลิงก์เพื่อยืนยันการสมัครสมาชิก", "Please check your inbox and click the link to confirm your registration"))
                                     .font(.kanitRegular(size: 16))
                                     .foregroundColor(.black.opacity(0.8))
                                     .multilineTextAlignment(.center)
-                                
+
                                 if let email = supabaseManager.pendingEmailConfirmation {
-                                    Text("อีเมล: \(email)")
+                                    Text(L("อีเมล:", "Email:") + " \(email)")
                                         .font(.kanitMedium(size: 14))
                                         .foregroundColor(.black.opacity(0.6))
                                         .padding(.horizontal, 16)
@@ -73,12 +74,12 @@ struct EmailConfirmationView: View {
                                 HStack(spacing: 8) {
                                     Image(systemName: "checkmark.circle.fill")
                                         .foregroundColor(.blue)
-                                    Text("หลังจากยืนยันอีเมลแล้ว")
+                                    Text(L("หลังจากยืนยันอีเมลแล้ว", "After confirming your email"))
                                         .font(.kanitMedium(size: 14))
                                         .foregroundColor(.blue)
                                 }
-                                
-                                Text("คุณจะสามารถเข้าสู่ระบบและเริ่มต้นการตั้งค่าโปรไฟล์ได้")
+
+                                Text(L("คุณจะสามารถเข้าสู่ระบบและเริ่มต้นการตั้งค่าโปรไฟล์ได้", "You will be able to sign in and start setting up your profile"))
                                     .font(.kanitRegular(size: 14))
                                     .foregroundColor(.blue.opacity(0.8))
                                     .multilineTextAlignment(.center)
@@ -97,7 +98,7 @@ struct EmailConfirmationView: View {
                                     supabaseManager.pendingEmailConfirmation = nil
                                 }) {
                                     HStack {
-                                        Text("เข้าสู่ระบบหลังจากยืนยันแล้ว")
+                                        Text(L("เข้าสู่ระบบหลังจากยืนยันแล้ว", "Sign In After Confirmation"))
                                             .font(.kanitMedium(size: 16))
                                         Image(systemName: "arrow.right")
                                             .font(.system(size: 16))
@@ -122,11 +123,11 @@ struct EmailConfirmationView: View {
                                             Image(systemName: "arrow.clockwise")
                                                 .font(.system(size: 16))
                                         }
-                                        
+
                                         if cooldown > 0 {
-                                            Text("ส่งใหม่ได้ใน \(cooldown) วินาที")
+                                            Text(L("ส่งใหม่ได้ใน \(cooldown) วินาที", "Resend available in \(cooldown) seconds"))
                                         } else {
-                                            Text("ส่งอีเมลยืนยันใหม่")
+                                            Text(L("ส่งอีเมลยืนยันใหม่", "Resend Confirmation Email"))
                                         }
                                     }
                                     .font(.kanitMedium(size: 16))
@@ -147,7 +148,7 @@ struct EmailConfirmationView: View {
                                     supabaseManager.requiresEmailConfirmation = false
                                     supabaseManager.pendingEmailConfirmation = nil
                                 }) {
-                                    Text("กลับไปหน้าสมัครสมาชิก")
+                                    Text(L("กลับไปหน้าสมัครสมาชิก", "Back to Sign Up"))
                                         .font(.kanitMedium(size: 14))
                                         .foregroundColor(.black.opacity(0.6))
                                 }
@@ -155,12 +156,12 @@ struct EmailConfirmationView: View {
                             
                             // Help text
                             VStack(spacing: 4) {
-                                Text("ไม่ได้รับอีเมลยืนยัน? ตรวจสอบโฟลเดอร์ Spam")
+                                Text(L("ไม่ได้รับอีเมลยืนยัน? ตรวจสอบโฟลเดอร์ Spam", "Didn't receive the confirmation email? Check your Spam folder"))
                                     .font(.kanitRegular(size: 12))
                                     .foregroundColor(.black.opacity(0.5))
                                     .multilineTextAlignment(.center)
-                                
-                                Text("ติดต่อเราได้ที่ support@pawjai.co")
+
+                                Text(L("ติดต่อเราได้ที่ support@pawjai.co", "Contact us at support@pawjai.co"))
                                     .font(.kanitRegular(size: 12))
                                     .foregroundColor(.black.opacity(0.5))
                             }
@@ -244,6 +245,11 @@ struct EmailConfirmationView: View {
             }
         }.resume()
     }
+}
+
+// Simple inline translator using LanguageManager
+private func L(_ th: String, _ en: String) -> String {
+    LanguageManager.shared.t(th, en)
 }
 
 #Preview {
