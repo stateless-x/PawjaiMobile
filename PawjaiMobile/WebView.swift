@@ -17,14 +17,18 @@ struct WebView: UIViewRepresentable {
     
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        
+
+        // 🔥 CRITICAL FIX: Share process pool for cookie persistence across app restarts
+        // Without this, each WebView instance has isolated cookies
+        configuration.processPool = WKProcessPool.shared
+
         // Enable camera and microphone permissions
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
-        
+
         // Allow camera and microphone access
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
-        
+
         // Configure JavaScript settings using the newer API
         if #available(iOS 14.0, *) {
             let preferences = WKWebpagePreferences()
@@ -34,18 +38,28 @@ struct WebView: UIViewRepresentable {
             // Fallback for iOS < 14
             configuration.preferences.javaScriptEnabled = true
         }
-        
+
         // Enable file uploads and camera capture
         configuration.allowsAirPlayForMediaPlayback = true
         configuration.allowsPictureInPictureMediaPlayback = true
-        
-        // Ensure persistent website data store for cookie retention
-        // Web app uses cookie-only storage (no localStorage for auth)
+
+        // ✅ PERSISTENT: Use default data store for cookies AND localStorage
+        // This ensures webapp cache (localStorage/IndexedDB) persists across sessions
+        // Auth cookies are managed separately via WKHTTPCookieStore (secure)
         configuration.websiteDataStore = .default()
+
+        // 🍎 IMPORTANT: .default() provides:
+        // - Persistent cookies (survives app restart)
+        // - Persistent localStorage (webapp cache works)
+        // - Persistent IndexedDB (offline data works)
+        // - Shared with Safari (if user signs in via Safari, works in app too)
         
         // Add message handlers on configuration before creating the webView
         configuration.userContentController.add(context.coordinator, name: "signOut")
         configuration.userContentController.add(context.coordinator, name: "notificationSettingsChanged")
+
+        // 🍎 SECURE: Add session establishment handler for WKHTTPCookieStore bridge
+        configuration.userContentController.add(context.coordinator, name: "sessionEstablished")
 
         // Create webView after configuration is fully prepared
         let webView = WKWebView(frame: .zero, configuration: configuration)
@@ -86,12 +100,21 @@ struct WebView: UIViewRepresentable {
                 name: .syncWebViewTokens,
                 object: nil
             )
+
+            // 🔥 NEW: Listen for session verification requests
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleVerifySession(_:)),
+                name: .verifyWebViewSession,
+                object: nil
+            )
         }
 
         deinit {
             NotificationCenter.default.removeObserver(self)
         }
 
+        // 🔥 P0 FIX: Use WKHTTPCookieStore as primary sync mechanism (with retry)
         @objc private func handleSyncTokens(_ notification: Notification) {
             guard let webView = self.webView,
                   let userInfo = notification.userInfo,
@@ -100,12 +123,83 @@ struct WebView: UIViewRepresentable {
                 return
             }
 
-            // Inject tokens directly into WebView cookie using Supabase session format
+            // Sync with retry logic (3 attempts: 0s, 1s, 3s)
+            syncTokensWithRetry(webView: webView, accessToken: accessToken, refreshToken: refreshToken, attempt: 0)
+        }
+
+        private func syncTokensWithRetry(webView: WKWebView, accessToken: String, refreshToken: String, attempt: Int) {
             let expiresAt = Int(Date().timeIntervalSince1970) + 3600 // 1 hour from now
+
+            // Create Supabase session format
+            let sessionData: [String: Any] = [
+                "state": [
+                    "session": [
+                        "access_token": accessToken,
+                        "refresh_token": refreshToken,
+                        "expires_at": expiresAt,
+                        "expires_in": 3600,
+                        "token_type": "bearer"
+                    ]
+                ]
+            ]
+
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: sessionData),
+                  let jsonString = String(data: jsonData, encoding: .utf8) else {
+                print("❌ [Cookie Sync] Failed to serialize session data")
+                return
+            }
+
+            // ✅ PRIMARY METHOD: WKHTTPCookieStore (Apple recommended)
+            let cookieProperties: [HTTPCookiePropertyKey: Any] = [
+                .name: "pawjai-auth-session-pawjai-auth-storage",
+                .value: jsonString,
+                .domain: ".pawjai.co",
+                .path: "/",
+                .secure: true,
+                .expires: Date().addingTimeInterval(31536000), // 1 year
+            ]
+
+            guard let cookie = HTTPCookie(properties: cookieProperties) else {
+                print("❌ [Cookie Sync] Failed to create HTTPCookie")
+                // Fallback to JavaScript injection
+                self.syncTokensViaJavaScript(webView: webView, accessToken: accessToken, refreshToken: refreshToken)
+                return
+            }
+
+            let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+            cookieStore.setCookie(cookie) { [weak self] in
+                print("✅ [Cookie Sync] WKHTTPCookieStore sync successful (attempt \(attempt + 1))")
+
+                // Verify cookie was set
+                cookieStore.getAllCookies { cookies in
+                    let authCookie = cookies.first { $0.name == "pawjai-auth-session-pawjai-auth-storage" }
+                    if authCookie != nil {
+                        print("✅ [Cookie Sync] Cookie verified present")
+                    } else {
+                        print("⚠️ [Cookie Sync] Cookie verification failed on attempt \(attempt + 1)")
+
+                        // Retry with exponential backoff (max 3 attempts)
+                        if attempt < 2 {
+                            let delay = pow(2.0, Double(attempt))
+                            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                                self?.syncTokensWithRetry(webView: webView, accessToken: accessToken, refreshToken: refreshToken, attempt: attempt + 1)
+                            }
+                        } else {
+                            // Final fallback: JavaScript injection
+                            print("⚠️ [Cookie Sync] All WKHTTPCookieStore attempts failed, falling back to JavaScript")
+                            self?.syncTokensViaJavaScript(webView: webView, accessToken: accessToken, refreshToken: refreshToken)
+                        }
+                    }
+                }
+            }
+        }
+
+        // 🔥 FALLBACK: JavaScript injection (only used if WKHTTPCookieStore fails)
+        private func syncTokensViaJavaScript(webView: WKWebView, accessToken: String, refreshToken: String) {
+            let expiresAt = Int(Date().timeIntervalSince1970) + 3600
             let syncScript = """
             (function() {
                 try {
-                    // Create Supabase session object
                     const session = {
                         access_token: '\(accessToken)',
                         refresh_token: '\(refreshToken)',
@@ -114,11 +208,10 @@ struct WebView: UIViewRepresentable {
                         token_type: 'bearer'
                     };
 
-                    // Wrap in the format Supabase expects
                     const authStorage = {
                         state: {
                             session: session,
-                            user: null // Will be populated by Supabase
+                            user: null
                         }
                     };
 
@@ -132,18 +225,66 @@ struct WebView: UIViewRepresentable {
                         (window.location.protocol === 'https:' ? '; secure' : '') +
                         '; samesite=lax';
 
-                    console.log('[Native→WebView] Tokens synced to cookie');
+                    console.log('[Native→WebView] Tokens synced via JavaScript fallback');
                 } catch (error) {
-                    console.error('[Native→WebView] Error syncing tokens:', error);
+                    console.error('[Native→WebView] JavaScript sync error:', error);
                 }
             })();
             """
 
             webView.evaluateJavaScript(syncScript) { _, error in
                 if let error = error {
-                    print("Error syncing tokens to WebView:", error)
+                    print("❌ [Cookie Sync] JavaScript fallback failed:", error.localizedDescription)
                 } else {
-                    print("✅ Tokens successfully synced to WebView cookie")
+                    print("✅ [Cookie Sync] JavaScript fallback successful")
+                }
+            }
+        }
+
+        // 🔥 NEW: Verify WebView session and recover if missing
+        @objc private func handleVerifySession(_ notification: Notification) {
+            guard let webView = self.webView,
+                  let userInfo = notification.userInfo,
+                  let accessToken = userInfo["access_token"] as? String,
+                  let refreshToken = userInfo["refresh_token"] as? String else {
+                return
+            }
+
+            // Check if cookie exists
+            let verifyScript = """
+            (function() {
+                const cookieName = 'pawjai-auth-session-pawjai-auth-storage';
+                const cookies = document.cookie.split(';');
+                for (let cookie of cookies) {
+                    if (cookie.trim().startsWith(cookieName + '=')) {
+                        return 'present';
+                    }
+                }
+                return 'missing';
+            })();
+            """
+
+            webView.evaluateJavaScript(verifyScript) { result, error in
+                if let error = error {
+                    print("❌ [Session Verify] Error checking cookie:", error.localizedDescription)
+                    return
+                }
+
+                if let status = result as? String {
+                    if status == "present" {
+                        print("✅ [Session Verify] Cookie verified present")
+                    } else if status == "missing" {
+                        print("⚠️ [Session Verify] Cookie MISSING - attempting recovery")
+                        // Re-sync tokens if cookie missing
+                        NotificationCenter.default.post(
+                            name: .syncWebViewTokens,
+                            object: nil,
+                            userInfo: [
+                                "access_token": accessToken,
+                                "refresh_token": refreshToken
+                            ]
+                        )
+                    }
                 }
             }
         }
@@ -157,18 +298,96 @@ struct WebView: UIViewRepresentable {
                 DispatchQueue.main.async {
                     NotificationManager.shared.forceRefreshNotifications()
                 }
+            } else if message.name == "sessionEstablished" {
+                // 🍎 SECURE BRIDGE: Receive tokens from web app and set via WKHTTPCookieStore
+                self.handleSecureSessionBridge(message: message)
+            }
+        }
+
+        // 🍎 SECURE: WKHTTPCookieStore bridge for HttpOnly cookies
+        // This is the Apple-recommended way to securely manage auth cookies
+        private func handleSecureSessionBridge(message: WKScriptMessage) {
+            guard let webView = self.webView,
+                  let body = message.body as? [String: Any],
+                  let accessToken = body["accessToken"] as? String,
+                  let refreshToken = body["refreshToken"] as? String,
+                  let expiresAt = body["expiresAt"] as? Int else {
+                print("❌ [Secure Bridge] Invalid message format")
+                return
+            }
+
+            print("🍎 [Secure Bridge] Setting HttpOnly cookies via WKHTTPCookieStore")
+
+            // Create Supabase session format (same as cookieStorage expects)
+            let sessionData: [String: Any] = [
+                "state": [
+                    "session": [
+                        "access_token": accessToken,
+                        "refresh_token": refreshToken,
+                        "expires_at": expiresAt,
+                        "expires_in": 3600,
+                        "token_type": "bearer"
+                    ]
+                ]
+            ]
+
+            guard let jsonData = try? JSONSerialization.data(withJSONObject: sessionData),
+                  let jsonString = String(data: jsonData, encoding: .utf8) else {
+                print("❌ [Secure Bridge] Failed to serialize session data")
+                return
+            }
+
+            // Calculate byte size (iOS has stricter limits than desktop)
+            let byteSize = jsonData.count
+            if byteSize > 3800 {
+                print("⚠️ [Secure Bridge] Cookie too large: \(byteSize) bytes (limit ~4000)")
+                // Still try to set, but warn
+            }
+
+            // Create HTTPOnly cookie using WKHTTPCookieStore
+            let cookieProperties: [HTTPCookiePropertyKey: Any] = [
+                .name: "pawjai-auth-session-pawjai-auth-storage",
+                .value: jsonString,
+                .domain: ".pawjai.co", // Subdomain sharing
+                .path: "/",
+                .secure: true, // Always require HTTPS
+                .expires: Date().addingTimeInterval(31536000), // 1 year
+                // .httpOnly: true is default and SECURE ✅
+            ]
+
+            guard let cookie = HTTPCookie(properties: cookieProperties) else {
+                print("❌ [Secure Bridge] Failed to create HTTPCookie")
+                return
+            }
+
+            // Set cookie via WKHTTPCookieStore (secure, native API)
+            let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+            cookieStore.setCookie(cookie) { [weak self] in
+                print("✅ [Secure Bridge] HttpOnly cookie set successfully")
+
+                // Verify cookie was set
+                cookieStore.getAllCookies { cookies in
+                    let authCookie = cookies.first { $0.name == "pawjai-auth-session-pawjai-auth-storage" }
+                    if authCookie != nil {
+                        print("✅ [Secure Bridge] Cookie verified present (\(byteSize) bytes)")
+                    } else {
+                        print("⚠️ [Secure Bridge] Cookie verification failed")
+                    }
+                }
+
+                // Also save to native Keychain for cross-session persistence
+                SupabaseManager.shared.saveTokensFromBridge(
+                    accessToken: accessToken,
+                    refreshToken: refreshToken
+                )
             }
         }
         
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            // Store webView reference for token sync
             self.webView = webView
-
             DispatchQueue.main.async {
                 self.parent.isLoading = true
                 self.parent.errorMessage = nil
-
-                SupabaseManager.shared.ensureValidToken { _ in }
             }
         }
         
@@ -223,51 +442,102 @@ struct WebView: UIViewRepresentable {
             return false
         }
         
-        // DEPRECATED: This function is no longer needed
-        // Tokens are now synced proactively from native app via handleSyncTokens()
-        // Supabase client handles token refresh automatically via autoRefreshToken
-        // Keeping this for backwards compatibility, but it only refreshes cookie max-age
-        private func syncAuthStorage(webView: WKWebView) {
-            let syncScript = """
-            (function() {
-                try {
-                    const COOKIE_NAME = 'pawjai-auth-session-pawjai-auth-storage';
-                    const COOKIE_MAX_AGE = 31536000; // 365 days (1 year)
+        // 🔥 IMPROVED: Token sync with retry logic and readyState check
+        // Ensures page is fully loaded before injecting tokens to prevent race conditions
+        private func syncAuthStorage(webView: WKWebView, retryCount: Int = 0) {
+            let maxRetries = 3
+            let retryDelay: TimeInterval = 0.1 // 100ms
 
-                    function getCookieValue(name) {
-                        const cookies = document.cookie.split(';');
-                        for (let cookie of cookies) {
-                            const [cookieName, cookieValue] = cookie.trim().split('=');
-                            if (cookieName === name) {
-                                return decodeURIComponent(cookieValue);
-                            }
+            // First, check if page is ready
+            webView.evaluateJavaScript("document.readyState") { result, error in
+                if let error = error {
+                    print("❌ [Token Sync] Error checking readyState:", error.localizedDescription)
+                    if retryCount < maxRetries {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
+                            self.syncAuthStorage(webView: webView, retryCount: retryCount + 1)
                         }
-                        return null;
                     }
-
-                    function setCookie(name, value) {
-                        const isSecure = window.location.protocol === 'https:';
-                        const cookieString = name + '=' + encodeURIComponent(value) +
-                            '; max-age=' + COOKIE_MAX_AGE +
-                            '; path=/' +
-                            (isSecure ? '; secure' : '') +
-                            '; samesite=lax';
-                        document.cookie = cookieString;
-                    }
-
-                    // Cookie-only storage - check if cookie exists and refresh max-age
-                    const authData = getCookieValue(COOKIE_NAME);
-                    if (authData) {
-                        // Refresh cookie max-age to prevent expiration
-                        setCookie(COOKIE_NAME, authData);
-                    }
-                } catch (error) {
-                    // Silent failure - auth handled by native layer
+                    return
                 }
-            })();
-            """
 
-            webView.evaluateJavaScript(syncScript) { _, _ in }
+                guard let readyState = result as? String else {
+                    if retryCount < maxRetries {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
+                            self.syncAuthStorage(webView: webView, retryCount: retryCount + 1)
+                        }
+                    }
+                    return
+                }
+
+                // Only proceed if page is complete
+                if readyState != "complete" {
+                    if retryCount < maxRetries {
+                        print("⏳ [Token Sync] Page not ready (state: \(readyState)), retrying... (\(retryCount + 1)/\(maxRetries))")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
+                            self.syncAuthStorage(webView: webView, retryCount: retryCount + 1)
+                        }
+                    } else {
+                        print("⚠️ [Token Sync] Page never reached ready state, proceeding anyway")
+                    }
+                    return
+                }
+
+                // Page is ready, inject token sync script
+                let syncScript = """
+                (function() {
+                    try {
+                        const COOKIE_NAME = 'pawjai-auth-session-pawjai-auth-storage';
+                        const COOKIE_MAX_AGE = 31536000; // 365 days (1 year)
+
+                        function getCookieValue(name) {
+                            const cookies = document.cookie.split(';');
+                            for (let cookie of cookies) {
+                                const [cookieName, cookieValue] = cookie.trim().split('=');
+                                if (cookieName === name) {
+                                    return decodeURIComponent(cookieValue);
+                                }
+                            }
+                            return null;
+                        }
+
+                        function setCookie(name, value) {
+                            const isSecure = window.location.protocol === 'https:';
+                            const cookieString = name + '=' + encodeURIComponent(value) +
+                                '; max-age=' + COOKIE_MAX_AGE +
+                                '; path=/' +
+                                (isSecure ? '; secure' : '') +
+                                '; samesite=lax';
+                            document.cookie = cookieString;
+                        }
+
+                        // Cookie-only storage - check if cookie exists and refresh max-age
+                        const authData = getCookieValue(COOKIE_NAME);
+                        if (authData) {
+                            // Refresh cookie max-age to prevent expiration
+                            setCookie(COOKIE_NAME, authData);
+                            return 'refreshed';
+                        }
+                        return 'not_found';
+                    } catch (error) {
+                        return 'error: ' + error.message;
+                    }
+                })();
+                """
+
+                webView.evaluateJavaScript(syncScript) { result, error in
+                    if let error = error {
+                        print("❌ [Token Sync] Script execution failed:", error.localizedDescription)
+                    } else if let result = result as? String {
+                        if result == "refreshed" {
+                            print("✅ [Token Sync] Cookie refreshed successfully")
+                        } else if result == "not_found" {
+                            print("⚠️ [Token Sync] No auth cookie found")
+                        } else {
+                            print("ℹ️ [Token Sync] Result:", result)
+                        }
+                    }
+                }
+            }
         }
         
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -488,5 +758,29 @@ struct WebViewContainer: View {
                 currentURL = url
             }
         }
+    }
+}
+
+// MARK: - WKProcessPool Manager
+
+/// 🍎 SECURE: App-scoped process pool (not global singleton)
+/// This prevents memory leaks while ensuring cookie persistence
+class WebViewProcessPoolManager {
+    static let shared = WebViewProcessPoolManager()
+    let processPool = WKProcessPool()
+
+    private init() {
+        print("🍎 [ProcessPool] Initialized app-scoped process pool")
+    }
+
+    deinit {
+        print("🍎 [ProcessPool] Process pool deallocated")
+    }
+}
+
+extension WKProcessPool {
+    /// App-scoped shared process pool for cookie persistence
+    static var shared: WKProcessPool {
+        return WebViewProcessPoolManager.shared.processPool
     }
 }

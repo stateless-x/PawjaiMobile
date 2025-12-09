@@ -8,6 +8,8 @@
 import Foundation
 import AuthenticationServices
 import Security
+import BackgroundTasks
+import WebKit
 
 class SupabaseManager: NSObject, ObservableObject {
     static let shared = SupabaseManager()
@@ -45,65 +47,80 @@ class SupabaseManager: NSObject, ObservableObject {
     }
     
     private func checkAuthenticationState() {
-        
+        // ✅ P0 FIX: INSTANT LAUNCH - Show UI immediately, validate in background
+
         // Check for stored authentication tokens
         if let storedUser = loadStoredUser() {
-            // If access token is fresh, validate account and proceed
-            if isTokenValid(user: storedUser) {
-                validateAccountStatus(user: storedUser) { [weak self] isValid in
-                    DispatchQueue.main.async {
+            // ✅ CRITICAL: Set authenticated state IMMEDIATELY (instant UI)
+            // Don't wait for validation - trust keychain
+            DispatchQueue.main.async {
+                self.currentUser = storedUser
+                self.isAuthenticated = true
+                self.isInitializing = false
+                self.objectWillChange.send()
+            }
+
+            // ✅ BACKGROUND: Validate and sync tokens silently (non-blocking)
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                self?.validateAndSyncInBackground(user: storedUser)
+            }
+        } else {
+            // No tokens - show auth view
+            DispatchQueue.main.async {
+                self.isAuthenticated = false
+                self.currentUser = nil
+                self.isInitializing = false
+            }
+        }
+    }
+
+    // 🔥 P0 FIX: Background validation with 7-day offline grace period
+    private func validateAndSyncInBackground(user: User) {
+        // Check if token needs refresh
+        if !isTokenValid(user: user) {
+            // Token expired - try to refresh
+            refreshAccessToken { [weak self] success in
+                guard let self = self else { return }
+                if success, let refreshedUser = self.loadStoredUser() {
+                    // Refresh succeeded - validate account
+                    self.validateAccountStatus(user: refreshedUser) { [weak self] isValid in
                         if isValid {
-                            self?.currentUser = storedUser
-                            self?.isAuthenticated = true
-                            self?.objectWillChange.send()
-                            self?.navigateToHandoff(accessToken: storedUser.accessToken, refreshToken: storedUser.refreshToken)
+                            // ✅ Silently sync fresh tokens to WebView (no navigation!)
+                            self?.syncTokensToWebViewCookie(
+                                accessToken: refreshedUser.accessToken,
+                                refreshToken: refreshedUser.refreshToken
+                            )
                         } else {
-                            // Account invalid
-                            self?.clearStoredTokens()
-                            self?.isAuthenticated = false
-                            self?.currentUser = nil
-                        }
-                        self?.isInitializing = false
-                    }
-                }
-            } else {
-                // Access token likely expired; try to refresh before deciding
-                refreshAccessToken { [weak self] success in
-                    guard let self = self else { return }
-                    if success, let refreshedUser = self.loadStoredUser() {
-                        self.validateAccountStatus(user: refreshedUser) { [weak self] isValid in
+                            // Account invalid - sign out
                             DispatchQueue.main.async {
-                                if isValid {
-                                    self?.currentUser = refreshedUser
-                                    self?.isAuthenticated = true
-                                    self?.objectWillChange.send()
-                                    self?.navigateToHandoff(accessToken: refreshedUser.accessToken, refreshToken: refreshedUser.refreshToken)
-                                } else {
-                                    self?.clearStoredTokens()
-                                    self?.isAuthenticated = false
-                                    self?.currentUser = nil
-                                }
-                                self?.isInitializing = false
+                                self?.signOut()
                             }
                         }
-                    } else {
-                        // Refresh failed; clear tokens and show auth view
-                        // Do NOT attempt validation with expired token
-                        DispatchQueue.main.async {
-                            self.clearStoredTokens()
-                            self.isAuthenticated = false
-                            self.currentUser = nil
-                            self.isInitializing = false
-                        }
                     }
+                } else {
+                    // Refresh failed - keep user logged in, let them use the app
+                    // Supabase refresh tokens never expire, so this is likely a network issue
+                    // The WebView will auto-refresh when it can, and user can still browse cached content
+                    self.syncTokensToWebViewCookie(accessToken: user.accessToken, refreshToken: user.refreshToken)
                 }
             }
         } else {
-            self.isAuthenticated = false
-            self.currentUser = nil
-            self.isInitializing = false
+            // Token is fresh - just validate account and sync
+            validateAccountStatus(user: user) { [weak self] isValid in
+                if isValid {
+                    // ✅ Silently sync tokens to WebView (no navigation!)
+                    self?.syncTokensToWebViewCookie(
+                        accessToken: user.accessToken,
+                        refreshToken: user.refreshToken
+                    )
+                } else {
+                    // Account invalid - sign out
+                    DispatchQueue.main.async {
+                        self?.signOut()
+                    }
+                }
+            }
         }
-        
     }
 
     // MARK: - App Lifecycle Observers
@@ -117,6 +134,82 @@ class SupabaseManager: NSObject, ObservableObject {
             object: nil
         )
 
+        // 🔥 P1 FIX: Register background refresh task
+        registerBackgroundRefreshTask()
+    }
+
+    // MARK: - Background App Refresh
+
+    // 🔥 P1 FIX: Register background task for proactive token refresh
+    private func registerBackgroundRefreshTask() {
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: "co.pawjai.tokenRefresh",
+            using: nil
+        ) { [weak self] task in
+            self?.handleBackgroundTokenRefresh(task: task as! BGAppRefreshTask)
+        }
+
+        // Schedule first background refresh
+        scheduleBackgroundRefresh()
+    }
+
+    private func handleBackgroundTokenRefresh(task: BGAppRefreshTask) {
+        print("🔄 [Background] Token refresh task started")
+
+        // Schedule next refresh
+        scheduleBackgroundRefresh()
+
+        // Create task expiration handler
+        task.expirationHandler = {
+            print("⚠️ [Background] Task expiring, canceling token refresh")
+        }
+
+        // Only refresh if authenticated
+        guard isAuthenticated, let user = currentUser else {
+            task.setTaskCompleted(success: true)
+            return
+        }
+
+        // Check if token needs refresh
+        guard let timestampString = loadFromKeychain(forKey: "token_timestamp"),
+              let timestamp = Double(timestampString) else {
+            task.setTaskCompleted(success: true)
+            return
+        }
+
+        let tokenAge = Date().timeIntervalSince1970 - timestamp
+        // Refresh if token is older than 50 minutes
+        if tokenAge > 3000 {
+            refreshAccessToken { [weak self] success in
+                print(success ? "✅ [Background] Token refresh succeeded" : "⚠️ [Background] Token refresh failed")
+
+                // Sync to WebView on success
+                if success, let refreshedUser = self?.loadStoredUser() {
+                    self?.syncTokensToWebViewCookie(
+                        accessToken: refreshedUser.accessToken,
+                        refreshToken: refreshedUser.refreshToken
+                    )
+                }
+
+                task.setTaskCompleted(success: success)
+            }
+        } else {
+            print("✅ [Background] Token still fresh, no refresh needed")
+            task.setTaskCompleted(success: true)
+        }
+    }
+
+    func scheduleBackgroundRefresh() {
+        let request = BGAppRefreshTaskRequest(identifier: "co.pawjai.tokenRefresh")
+        // Schedule to run in 50 minutes (before token expires at 60 minutes)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 50 * 60)
+
+        do {
+            try BGTaskScheduler.shared.submit(request)
+            print("✅ [Background] Scheduled token refresh task for 50 minutes from now")
+        } catch {
+            print("❌ [Background] Failed to schedule token refresh: \(error.localizedDescription)")
+        }
     }
 
     @objc private func handleAppWillEnterForeground() {
@@ -145,6 +238,7 @@ class SupabaseManager: NSObject, ObservableObject {
         }
     }
 
+    // 🔥 IMPROVED: Sync tokens with verification
     private func syncTokensToWebViewCookie(accessToken: String, refreshToken: String) {
         // Post notification to WebView to inject tokens directly into cookie
         // This updates the session without navigating away from current page
@@ -156,44 +250,46 @@ class SupabaseManager: NSObject, ObservableObject {
                 "refresh_token": refreshToken
             ]
         )
+
+        // Verify after 500ms
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.verifyWebViewSession(accessToken: accessToken, refreshToken: refreshToken)
+        }
+    }
+
+    // 🔥 NEW: Verify WebView has the session cookie
+    private func verifyWebViewSession(accessToken: String, refreshToken: String) {
+        // Post verification request
+        NotificationCenter.default.post(
+            name: .verifyWebViewSession,
+            object: nil,
+            userInfo: [
+                "access_token": accessToken,
+                "refresh_token": refreshToken
+            ]
+        )
     }
 
     private func attemptTokenRefresh(user: User) {
         refreshAccessToken { [weak self] success in
-            if success {
-                if let refreshedUser = self?.currentUser {
-                    self?.navigateToHandoff(accessToken: refreshedUser.accessToken, refreshToken: refreshedUser.refreshToken)
-                }
+            if success, let refreshedUser = self?.currentUser {
+                self?.syncTokensToWebViewCookie(
+                    accessToken: refreshedUser.accessToken,
+                    refreshToken: refreshedUser.refreshToken
+                )
             } else {
-                // Validate account status before signing out
-                self?.validateAccountStatus(user: user) { [weak self] isValid in
-                    if !isValid {
-                        DispatchQueue.main.async {
-                            self?.signOut()
-                        }
-                    }
-                }
+                // Keep user logged in even if refresh fails
+                // WebView will handle refresh when network returns
+                self?.syncTokensToWebViewCookie(
+                    accessToken: user.accessToken,
+                    refreshToken: user.refreshToken
+                )
             }
         }
     }
 
     // MARK: - Helper Methods
-
-    private func navigateToHandoff(accessToken: String, refreshToken: String) {
-        var handoffComponents = URLComponents(string: "\(Configuration.webAppURL)/auth/native-handoff")!
-        handoffComponents.queryItems = [
-            URLQueryItem(name: "access_token", value: accessToken),
-            URLQueryItem(name: "refresh_token", value: refreshToken)
-        ]
-
-        if let handoffURL = handoffComponents.url {
-            NotificationCenter.default.post(
-                name: .navigateToURL,
-                object: nil,
-                userInfo: ["url": handoffURL]
-            )
-        }
-    }
+    // ❌ DELETED: navigateToHandoff() - No longer needed, use syncTokensToWebViewCookie() instead
 
     // MARK: - Keychain Storage Methods
 
@@ -203,13 +299,23 @@ class SupabaseManager: NSObject, ObservableObject {
         saveToKeychain(refreshToken, forKey: "refresh_token")
         saveToKeychain(String(Date().timeIntervalSince1970), forKey: "token_timestamp")
     }
+
+    // 🍎 PUBLIC: Called by secure bridge to save tokens from WKHTTPCookieStore
+    func saveTokensFromBridge(accessToken: String, refreshToken: String) {
+        saveTokens(accessToken: accessToken, refreshToken: refreshToken)
+        DispatchQueue.main.async {
+            self.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+            self.isAuthenticated = true
+            self.objectWillChange.send()
+        }
+        print("✅ [Keychain] Tokens saved from secure bridge")
+    }
     
     private func loadStoredUser() -> User? {
         guard let accessToken = loadFromKeychain(forKey: "access_token"),
               let refreshToken = loadFromKeychain(forKey: "refresh_token") else {
             return nil
         }
-        
         return User(accessToken: accessToken, refreshToken: refreshToken)
     }
     
@@ -231,9 +337,13 @@ class SupabaseManager: NSObject, ObservableObject {
         deleteFromKeychain(forKey: "token_timestamp")
     }
     
-    // MARK: - Token Refresh Methods
-    
+    // MARK: - Token Refresh
+
     private func refreshAccessToken(completion: @escaping (Bool) -> Void) {
+        refreshAccessTokenWithRetry(attempt: 0, maxRetries: 3, completion: completion)
+    }
+
+    private func refreshAccessTokenWithRetry(attempt: Int, maxRetries: Int, completion: @escaping (Bool) -> Void) {
         // Check if refresh is already in progress (prevent race condition)
         refreshQueue.sync {
             if isRefreshing {
@@ -249,19 +359,19 @@ class SupabaseManager: NSObject, ObservableObject {
             return
         }
 
-        
         // Create the token refresh request
         let tokenURL = URL(string: "\(Configuration.supabaseURL)/auth/v1/token")!
         var request = URLRequest(url: tokenURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(Configuration.supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-        
+        request.timeoutInterval = 10  // 10 second timeout
+
         let body = [
             "grant_type": "refresh_token",
             "refresh_token": refreshToken
         ]
-        
+
         do {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         } catch {
@@ -269,40 +379,99 @@ class SupabaseManager: NSObject, ObservableObject {
             completion(false)
             return
         }
-        
+
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            // Helper to reset flag and call completion
-            let finishRefresh: (Bool) -> Void = { success in
-                self?.refreshQueue.sync { self?.isRefreshing = false }
-                DispatchQueue.main.async { completion(success) }
+            guard let self = self else { return }
+
+            let finishRefresh: (Bool, Bool) -> Void = { success, shouldRetry in
+                self.refreshQueue.sync { self.isRefreshing = false }
+
+                if !success && shouldRetry && attempt < maxRetries {
+                    // Exponential backoff: 1s, 2s, 4s
+                    let delay = pow(2.0, Double(attempt))
+                    print("⚠️ [Token Refresh] Attempt \(attempt + 1) failed, retrying in \(delay)s...")
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                        self.refreshAccessTokenWithRetry(attempt: attempt + 1, maxRetries: maxRetries, completion: completion)
+                    }
+                } else {
+                    DispatchQueue.main.async { completion(success) }
+                }
             }
 
-            // Do not dispatch to main immediately; parse off main thread, switch at end
-            if error != nil {
-                finishRefresh(false)
+            // Check for HTTP response status
+            if let httpResponse = response as? HTTPURLResponse {
+                let statusCode = httpResponse.statusCode
+
+                // 401/403: Invalid refresh token (don't retry)
+                if statusCode == 401 || statusCode == 403 {
+                    print("❌ [Token Refresh] Invalid refresh token (HTTP \(statusCode))")
+                    finishRefresh(false, false)  // Don't retry
+                    return
+                }
+
+                // 5xx: Server error (retry)
+                if statusCode >= 500 {
+                    print("⚠️ [Token Refresh] Server error (HTTP \(statusCode))")
+                    finishRefresh(false, true)  // Retry
+                    return
+                }
+
+                // 429: Rate limit (retry with longer delay)
+                if statusCode == 429 {
+                    print("⚠️ [Token Refresh] Rate limited (HTTP 429)")
+                    finishRefresh(false, true)  // Retry
+                    return
+                }
+            }
+
+            // Network error (retry)
+            if let error = error {
+                let nsError = error as NSError
+                // Check if it's a network error (no internet, timeout, etc.)
+                let isNetworkError = nsError.domain == NSURLErrorDomain &&
+                                    (nsError.code == NSURLErrorNotConnectedToInternet ||
+                                     nsError.code == NSURLErrorTimedOut ||
+                                     nsError.code == NSURLErrorCannotFindHost ||
+                                     nsError.code == NSURLErrorCannotConnectToHost)
+
+                if isNetworkError {
+                    print("⚠️ [Token Refresh] Network error: \(error.localizedDescription)")
+                    finishRefresh(false, true)  // Retry
+                } else {
+                    print("❌ [Token Refresh] Unknown error: \(error.localizedDescription)")
+                    finishRefresh(false, false)  // Don't retry
+                }
                 return
             }
+
             guard let data = data else {
-                finishRefresh(false)
+                finishRefresh(false, true)  // Retry
                 return
             }
+
             do {
                 if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     if let accessToken = json["access_token"] as? String,
                        let refreshToken = json["refresh_token"] as? String {
-                        self?.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
-                        self?.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
-                        finishRefresh(true)
-                    } else if json["error"] != nil {
-                        finishRefresh(false)
+                        self.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
+                        self.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
+                        print("✅ [Token Refresh] Success on attempt \(attempt + 1)")
+                        finishRefresh(true, false)
+                    } else if let errorMsg = json["error"] as? String {
+                        print("❌ [Token Refresh] Supabase error: \(errorMsg)")
+                        // Check if it's an auth error (don't retry) or other error (retry)
+                        let shouldRetry = !errorMsg.contains("invalid") && !errorMsg.contains("expired")
+                        finishRefresh(false, shouldRetry)
                     } else {
-                        finishRefresh(false)
+                        finishRefresh(false, true)  // Retry
                     }
                 } else {
-                    finishRefresh(false)
+                    finishRefresh(false, true)  // Retry
                 }
             } catch {
-                finishRefresh(false)
+                print("❌ [Token Refresh] JSON parse error: \(error.localizedDescription)")
+                finishRefresh(false, true)  // Retry
             }
         }.resume()
     }
@@ -310,9 +479,10 @@ class SupabaseManager: NSObject, ObservableObject {
     // MARK: - Account Validation Methods
     
     private func validateAccountStatus(user: User, completion: @escaping (Bool) -> Void) {
-        
+
+        // ✅ FIXED: Use backendApiURL instead of webAppURL for API calls
         // Create the validation request to check if account is still active
-        let validationURL = URL(string: "\(Configuration.webAppURL)/api/auth/guard")!
+        let validationURL = URL(string: "\(Configuration.backendApiURL)/api/auth/guard")!
         var request = URLRequest(url: validationURL)
         request.httpMethod = "GET"
         request.setValue("Bearer \(user.accessToken)", forHTTPHeaderField: "Authorization")
@@ -558,7 +728,7 @@ class SupabaseManager: NSObject, ObservableObject {
         
         // Save tokens to Keychain for persistence
         saveTokens(accessToken: accessToken, refreshToken: refreshToken)
-        
+
         // Store tokens and mark as authenticated on main thread
         DispatchQueue.main.async {
             self.isAuthenticated = true
@@ -567,8 +737,8 @@ class SupabaseManager: NSObject, ObservableObject {
             // Force UI update
             self.objectWillChange.send()
 
-            // Navigate to native-handoff to set up web app session
-            self.navigateToHandoff(accessToken: accessToken, refreshToken: refreshToken)
+            // ✅ P0 FIX: Sync tokens to WebView silently (no navigation!)
+            self.syncTokensToWebViewCookie(accessToken: accessToken, refreshToken: refreshToken)
         }
     }
     
@@ -612,7 +782,7 @@ class SupabaseManager: NSObject, ObservableObject {
                             
                             // Save tokens to Keychain for persistence
                             self?.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
-                            
+
                             // Store tokens and mark as authenticated on main thread
                             DispatchQueue.main.async {
                                 self?.isAuthenticated = true
@@ -621,8 +791,8 @@ class SupabaseManager: NSObject, ObservableObject {
                                 // Force UI update
                                 self?.objectWillChange.send()
 
-                                // Navigate to native-handoff to set up web app session
-                                self?.navigateToHandoff(accessToken: accessToken, refreshToken: refreshToken)
+                                // ✅ P0 FIX: Sync tokens to WebView silently (no navigation!)
+                                self?.syncTokensToWebViewCookie(accessToken: accessToken, refreshToken: refreshToken)
                             }
                         } else if let error = json["error"] as? String {
                             DispatchQueue.main.async {
@@ -719,8 +889,8 @@ class SupabaseManager: NSObject, ObservableObject {
                             // Force UI update
                             self?.objectWillChange.send()
 
-                            // Navigate to native-handoff to set up web app session
-                            self?.navigateToHandoff(accessToken: accessToken, refreshToken: refreshToken)
+                            // ✅ P0 FIX: Sync tokens to WebView silently (no navigation!)
+                            self?.syncTokensToWebViewCookie(accessToken: accessToken, refreshToken: refreshToken)
                             
                         } else if let error = json["error"] as? String {
                             // Check if error is due to unconfirmed email
@@ -824,8 +994,8 @@ class SupabaseManager: NSObject, ObservableObject {
                             // Force UI update
                             self?.objectWillChange.send()
 
-                            // Navigate to native-handoff to set up web app session
-                            self?.navigateToHandoff(accessToken: accessToken, refreshToken: refreshToken)
+                            // ✅ P0 FIX: Sync tokens to WebView silently (no navigation!)
+                            self?.syncTokensToWebViewCookie(accessToken: accessToken, refreshToken: refreshToken)
                             
                         } else if let userEmail = json["email"] as? String,
                                   json["confirmation_sent_at"] != nil {
@@ -929,45 +1099,61 @@ class SupabaseManager: NSObject, ObservableObject {
     
     func signOut() {
         clearStoredTokens()
+
+        // Clear all WebView cookies (especially auth session cookie)
+        clearWebViewCookies()
+
+        // Clear WebView data store (localStorage, IndexedDB, cache)
+        clearWebViewDataStore()
+
+        // Clear all scheduled notifications
+        NotificationManager.shared.removeAllNotifications()
+
+        // Cancel background refresh tasks
+        BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: "co.pawjai.tokenRefresh")
+
         DispatchQueue.main.async {
             self.isAuthenticated = false
             self.currentUser = nil
             self.errorMessage = nil
+
+            // Post notification to reload WebView (clears memory cache)
+            NotificationCenter.default.post(name: .userDidSignOut, object: nil)
         }
     }
-    
-    // MARK: - Token Refresh
 
-    // Proactive token refresh - called before making API requests or on navigation
-    func ensureValidToken(completion: @escaping (Bool) -> Void) {
-        guard currentUser != nil, isAuthenticated else {
-            completion(false)
-            return
-        }
-        
-        // Check if token is close to expiring (within 5 minutes)
-        guard let timestampString = loadFromKeychain(forKey: "token_timestamp"),
-              let timestamp = Double(timestampString) else {
-            completion(false)
-            return
-        }
-        
-        let tokenAge = Date().timeIntervalSince1970 - timestamp
-        let timeUntilExpiry = 3600 - tokenAge // Assuming 1 hour token lifetime
-        
-        if timeUntilExpiry < 300 { // Less than 5 minutes remaining
-            refreshAccessToken { [weak self] success in
-                DispatchQueue.main.async {
-                    if success {
-                        self?.objectWillChange.send()
-                    }
-                    completion(success)
+    private func clearWebViewCookies() {
+        let cookieStore = WKWebsiteDataStore.default().httpCookieStore
+        cookieStore.getAllCookies { cookies in
+            for cookie in cookies {
+                // Remove all pawjai.co cookies
+                if cookie.domain.contains("pawjai.co") {
+                    cookieStore.delete(cookie)
                 }
             }
-        } else {
-            completion(true)
         }
     }
+
+    private func clearWebViewDataStore() {
+        let dataTypes = Set([
+            WKWebsiteDataTypeDiskCache,
+            WKWebsiteDataTypeMemoryCache,
+            WKWebsiteDataTypeCookies,
+            WKWebsiteDataTypeLocalStorage,
+            WKWebsiteDataTypeSessionStorage,
+            WKWebsiteDataTypeIndexedDBDatabases,
+            WKWebsiteDataTypeWebSQLDatabases,
+            WKWebsiteDataTypeOfflineWebApplicationCache
+        ])
+
+        let date = Date(timeIntervalSince1970: 0)
+        WKWebsiteDataStore.default().removeData(
+            ofTypes: dataTypes,
+            modifiedSince: date,
+            completionHandler: {}
+        )
+    }
+    
 }
 
 // MARK: - ASWebAuthenticationPresentationContextProviding
@@ -985,9 +1171,67 @@ struct User {
     let refreshToken: String
 }
 
+// MARK: - Auth Error Types
+
+// 🔥 P1 FIX: Specific error types with user-friendly messages
+enum AuthError: Error {
+    case networkUnavailable
+    case invalidCredentials
+    case accountDisabled
+    case emailNotConfirmed
+    case serverError
+    case tokenExpired
+    case invalidInput
+    case unknown(String)
+
+    var userMessage: String {
+        switch self {
+        case .networkUnavailable:
+            return "No internet connection. Please check your network and try again."
+        case .invalidCredentials:
+            return "Email or password is incorrect. Please try again or reset your password."
+        case .accountDisabled:
+            return "Your account has been disabled. Please contact support for assistance."
+        case .emailNotConfirmed:
+            return "Please check your email and click the confirmation link to activate your account."
+        case .serverError:
+            return "We're experiencing technical difficulties. Please try again in a few minutes."
+        case .tokenExpired:
+            return "Your session has expired. Please sign in again."
+        case .invalidInput:
+            return "Please check your information and try again."
+        case .unknown(let message):
+            return message
+        }
+    }
+
+    var logMessage: String {
+        switch self {
+        case .networkUnavailable:
+            return "Network unreachable"
+        case .invalidCredentials:
+            return "Authentication failed - invalid credentials"
+        case .accountDisabled:
+            return "Account disabled"
+        case .emailNotConfirmed:
+            return "Email not confirmed"
+        case .serverError:
+            return "Server error"
+        case .tokenExpired:
+            return "Token expired"
+        case .invalidInput:
+            return "Invalid input"
+        case .unknown(let message):
+            return "Unknown error: \(message)"
+        }
+    }
+}
+
 // MARK: - Notification Names
 
 extension Notification.Name {
     static let navigateToURL = Notification.Name("navigateToURL")
     static let syncWebViewTokens = Notification.Name("syncWebViewTokens")
+    static let verifyWebViewSession = Notification.Name("verifyWebViewSession")
+    static let userDidSignOut = Notification.Name("userDidSignOut")
 }

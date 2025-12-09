@@ -34,5 +34,14 @@
 	</dict>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>co.pawjai.tokenRefresh</string>
+	</array>
 </dict>
 </plist>
