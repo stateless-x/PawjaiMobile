@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UserNotifications
 
 // Class to hold mutable state for URL handling
 class URLHandler: ObservableObject {
@@ -65,9 +66,11 @@ class URLHandler: ObservableObject {
 
 @main
 struct PawjaiMobileApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var notificationManager = NotificationManager.shared
     @StateObject private var language = LanguageManager.shared
     @StateObject private var urlHandler = URLHandler.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         FontManager.shared.registerFonts()
@@ -84,6 +87,12 @@ struct PawjaiMobileApp: App {
                 .environmentObject(language)
                 .onOpenURL { url in
                     urlHandler.handleIncomingURL(url)
+                }
+                .onChange(of: scenePhase) { oldPhase, newPhase in
+                    if newPhase == .active {
+                        // Clear badge when app becomes active
+                        PushManager.shared.clearBadge()
+                    }
                 }
         }
     }
@@ -116,3 +125,71 @@ struct PawjaiMobileApp: App {
         UINavigationBar.appearance().scrollEdgeAppearance = navBarAppearance
     }
 }
+
+// MARK: - AppDelegate for Push Notifications
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        // Set notification center delegate
+        UNUserNotificationCenter.current().delegate = self
+
+        // Register for push if already authenticated
+        if SupabaseManager.shared.isAuthenticated {
+            PushManager.shared.register()
+        }
+
+        // Clear badge on app launch
+        PushManager.shared.clearBadge()
+
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        PushManager.shared.handleDeviceToken(deviceToken)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        PushManager.shared.handleRegistrationError(error)
+    }
+
+    // Handle notification when app is in foreground
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        PushManager.shared.handleNotification(notification.request.content.userInfo)
+        completionHandler([.banner, .sound])
+    }
+
+    // Handle notification tap
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        PushManager.shared.handleNotification(response.notification.request.content.userInfo)
+        PushManager.shared.clearBadge()
+        completionHandler()
+    }
+
+    // Handle background notification
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        PushManager.shared.handleNotification(userInfo)
+        completionHandler(.newData)
+    }
+}
+

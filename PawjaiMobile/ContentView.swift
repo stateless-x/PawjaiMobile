@@ -57,13 +57,22 @@ struct ContentView: View {
                 webViewURL = URL(string: "\(Configuration.webAppURL)/dashboard?mobile_app=true")!
             }
 
-            // Setup notifications when user is authenticated
             if supabaseManager.isAuthenticated {
+                // Register for push notifications
+                PushManager.shared.register()
+
+                // Clear badge
+                PushManager.shared.clearBadge()
+
+                // Setup local notifications (deprecated - now handled by push)
                 if notificationManager.isAuthorized {
                     notificationManager.scheduleDailyNotification()
                 } else {
                     notificationManager.requestNotificationPermission()
                 }
+            } else {
+                // Unregister push on logout
+                PushManager.shared.unregister()
             }
         }
     }

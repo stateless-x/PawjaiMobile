@@ -90,6 +90,8 @@ class SupabaseManager: NSObject, ObservableObject {
                                 accessToken: refreshedUser.accessToken,
                                 refreshToken: refreshedUser.refreshToken
                             )
+                            // ✅ Retry push token registration with fresh tokens
+                            PushManager.shared.retryRegistration()
                         } else {
                             // Account invalid - sign out
                             DispatchQueue.main.async {
@@ -189,6 +191,8 @@ class SupabaseManager: NSObject, ObservableObject {
                         accessToken: refreshedUser.accessToken,
                         refreshToken: refreshedUser.refreshToken
                     )
+                    // ✅ Retry push token registration with fresh tokens
+                    PushManager.shared.retryRegistration()
                 }
 
                 task.setTaskCompleted(success: success)
@@ -309,6 +313,9 @@ class SupabaseManager: NSObject, ObservableObject {
             self.objectWillChange.send()
         }
         print("✅ [Keychain] Tokens saved from secure bridge")
+
+        // Retry push token registration now that we have valid tokens
+        PushManager.shared.retryRegistration()
     }
     
     private func loadStoredUser() -> User? {
@@ -1098,6 +1105,9 @@ class SupabaseManager: NSObject, ObservableObject {
     }
     
     func signOut() {
+        // Unregister push notifications
+        PushManager.shared.unregister()
+
         clearStoredTokens()
 
         // Clear all WebView cookies (especially auth session cookie)

@@ -530,6 +530,8 @@ struct WebView: UIViewRepresentable {
                     } else if let result = result as? String {
                         if result == "refreshed" {
                             print("✅ [Token Sync] Cookie refreshed successfully")
+                            // NOTE: This only refreshes the cookie max-age, not the actual tokens
+                            // Don't retry push registration here - wait for actual Supabase token refresh
                         } else if result == "not_found" {
                             print("⚠️ [Token Sync] No auth cookie found")
                         } else {
