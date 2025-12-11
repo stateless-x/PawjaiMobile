@@ -28,11 +28,9 @@ class PushManager: NSObject {
             }
 
             guard granted else {
-                print("❌ [Push] Permission denied")
                 return
             }
 
-            print("✅ [Push] Permission granted")
             DispatchQueue.main.async {
                 UIApplication.shared.registerForRemoteNotifications()
             }
@@ -42,7 +40,6 @@ class PushManager: NSObject {
     func handleDeviceToken(_ deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
         self.deviceToken = token
-        print("✅ [Push] Device token: \(token)")
         uploadToken(token)
     }
 
@@ -52,7 +49,6 @@ class PushManager: NSObject {
 
     private func uploadToken(_ token: String) {
         guard let accessToken = SupabaseManager.shared.currentUser?.accessToken else {
-            print("⚠️ [Push] No access token available")
             // Store token to retry on login
             self.deviceToken = token
             return
@@ -73,14 +69,10 @@ class PushManager: NSObject {
                 return
             }
 
-            if let http = response as? HTTPURLResponse {
-                if http.statusCode == 200 {
-                    print("✅ [Push] Token registered with backend")
-                } else {
-                    print("❌ [Push] Registration failed with status \(http.statusCode)")
-                    if let data = data, let responseString = String(data: data, encoding: .utf8) {
-                        print("   Response: \(responseString)")
-                    }
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                print("❌ [Push] Registration failed with status \(http.statusCode)")
+                if let data = data, let responseString = String(data: data, encoding: .utf8) {
+                    print("   Response: \(responseString)")
                 }
             }
         }.resume()
@@ -89,7 +81,6 @@ class PushManager: NSObject {
     // Call this when user logs in successfully to retry registration
     func retryRegistration() {
         guard let token = deviceToken else { return }
-        print("🔄 [Push] Retrying token registration after login")
         uploadToken(token)
     }
 
@@ -108,17 +99,12 @@ class PushManager: NSObject {
         let body = ["deviceToken": token]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        URLSession.shared.dataTask(with: request) { _, _, _ in
-            print("✅ [Push] Unregistered")
-        }.resume()
+        URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
     }
 
     func handleNotification(_ userInfo: [AnyHashable: Any]) {
-        print("📬 [Push] Notification received")
-
         // Handle deep link
         if let deepLink = userInfo["deepLink"] as? String {
-            print("🔗 [Push] Deep link: \(deepLink)")
             if let url = URL(string: "https://pawjai.co\(deepLink)") {
                 NotificationCenter.default.post(
                     name: .navigateToURL,
@@ -131,9 +117,12 @@ class PushManager: NSObject {
 
     func clearBadge() {
         DispatchQueue.main.async {
-            UIApplication.shared.applicationIconBadgeNumber = 0
+            UNUserNotificationCenter.current().setBadgeCount(0) { error in
+                if let error = error {
+                    print("❌ [Push] Failed to clear badge: \(error.localizedDescription)")
+                }
+            }
             UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-            print("🔔 [Push] Badge and notifications cleared")
         }
     }
 }

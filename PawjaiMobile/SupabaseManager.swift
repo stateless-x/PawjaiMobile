@@ -156,8 +156,6 @@ class SupabaseManager: NSObject, ObservableObject {
     }
 
     private func handleBackgroundTokenRefresh(task: BGAppRefreshTask) {
-        print("🔄 [Background] Token refresh task started")
-
         // Schedule next refresh
         scheduleBackgroundRefresh()
 
@@ -167,7 +165,7 @@ class SupabaseManager: NSObject, ObservableObject {
         }
 
         // Only refresh if authenticated
-        guard isAuthenticated, let user = currentUser else {
+        guard isAuthenticated, currentUser != nil else {
             task.setTaskCompleted(success: true)
             return
         }
@@ -183,8 +181,6 @@ class SupabaseManager: NSObject, ObservableObject {
         // Refresh if token is older than 50 minutes
         if tokenAge > 3000 {
             refreshAccessToken { [weak self] success in
-                print(success ? "✅ [Background] Token refresh succeeded" : "⚠️ [Background] Token refresh failed")
-
                 // Sync to WebView on success
                 if success, let refreshedUser = self?.loadStoredUser() {
                     self?.syncTokensToWebViewCookie(
@@ -198,7 +194,6 @@ class SupabaseManager: NSObject, ObservableObject {
                 task.setTaskCompleted(success: success)
             }
         } else {
-            print("✅ [Background] Token still fresh, no refresh needed")
             task.setTaskCompleted(success: true)
         }
     }
@@ -210,7 +205,6 @@ class SupabaseManager: NSObject, ObservableObject {
 
         do {
             try BGTaskScheduler.shared.submit(request)
-            print("✅ [Background] Scheduled token refresh task for 50 minutes from now")
         } catch {
             print("❌ [Background] Failed to schedule token refresh: \(error.localizedDescription)")
         }
@@ -312,7 +306,6 @@ class SupabaseManager: NSObject, ObservableObject {
             self.isAuthenticated = true
             self.objectWillChange.send()
         }
-        print("✅ [Keychain] Tokens saved from secure bridge")
 
         // Retry push token registration now that we have valid tokens
         PushManager.shared.retryRegistration()
@@ -396,7 +389,6 @@ class SupabaseManager: NSObject, ObservableObject {
                 if !success && shouldRetry && attempt < maxRetries {
                     // Exponential backoff: 1s, 2s, 4s
                     let delay = pow(2.0, Double(attempt))
-                    print("⚠️ [Token Refresh] Attempt \(attempt + 1) failed, retrying in \(delay)s...")
 
                     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
                         self.refreshAccessTokenWithRetry(attempt: attempt + 1, maxRetries: maxRetries, completion: completion)
@@ -412,21 +404,18 @@ class SupabaseManager: NSObject, ObservableObject {
 
                 // 401/403: Invalid refresh token (don't retry)
                 if statusCode == 401 || statusCode == 403 {
-                    print("❌ [Token Refresh] Invalid refresh token (HTTP \(statusCode))")
                     finishRefresh(false, false)  // Don't retry
                     return
                 }
 
                 // 5xx: Server error (retry)
                 if statusCode >= 500 {
-                    print("⚠️ [Token Refresh] Server error (HTTP \(statusCode))")
                     finishRefresh(false, true)  // Retry
                     return
                 }
 
                 // 429: Rate limit (retry with longer delay)
                 if statusCode == 429 {
-                    print("⚠️ [Token Refresh] Rate limited (HTTP 429)")
                     finishRefresh(false, true)  // Retry
                     return
                 }
@@ -443,10 +432,8 @@ class SupabaseManager: NSObject, ObservableObject {
                                      nsError.code == NSURLErrorCannotConnectToHost)
 
                 if isNetworkError {
-                    print("⚠️ [Token Refresh] Network error: \(error.localizedDescription)")
                     finishRefresh(false, true)  // Retry
                 } else {
-                    print("❌ [Token Refresh] Unknown error: \(error.localizedDescription)")
                     finishRefresh(false, false)  // Don't retry
                 }
                 return
@@ -463,10 +450,8 @@ class SupabaseManager: NSObject, ObservableObject {
                        let refreshToken = json["refresh_token"] as? String {
                         self.saveTokens(accessToken: accessToken, refreshToken: refreshToken)
                         self.currentUser = User(accessToken: accessToken, refreshToken: refreshToken)
-                        print("✅ [Token Refresh] Success on attempt \(attempt + 1)")
                         finishRefresh(true, false)
                     } else if let errorMsg = json["error"] as? String {
-                        print("❌ [Token Refresh] Supabase error: \(errorMsg)")
                         // Check if it's an auth error (don't retry) or other error (retry)
                         let shouldRetry = !errorMsg.contains("invalid") && !errorMsg.contains("expired")
                         finishRefresh(false, shouldRetry)
@@ -477,7 +462,6 @@ class SupabaseManager: NSObject, ObservableObject {
                     finishRefresh(false, true)  // Retry
                 }
             } catch {
-                print("❌ [Token Refresh] JSON parse error: \(error.localizedDescription)")
                 finishRefresh(false, true)  // Retry
             }
         }.resume()

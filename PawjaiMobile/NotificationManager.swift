@@ -19,7 +19,6 @@ class NotificationManager: ObservableObject {
 
     func requestNotificationPermission() {
         // Note: Push notification permissions are now handled by PushManager
-        print("ℹ️ [Notification] Permission requests handled by PushManager")
     }
 
     func checkAuthorizationStatus() {
@@ -32,12 +31,10 @@ class NotificationManager: ObservableObject {
 
     func scheduleDailyNotification() {
         // DEPRECATED: Local notification scheduling is now handled by backend push notifications
-        print("ℹ️ [Notification] Local scheduling disabled - using push from backend")
     }
 
     func forceRefreshNotifications() {
         // DEPRECATED: No longer needed with backend push notifications
-        print("ℹ️ [Notification] Refresh not needed - using push from backend")
     }
 
     func removeAllNotifications() {
@@ -49,6 +46,5 @@ class NotificationManager: ObservableObject {
     func setupNotifications() {
         // Kept for backward compatibility - now handled by PushManager
         checkAuthorizationStatus()
-        print("ℹ️ [Notification] Setup handled by PushManager")
     }
 }

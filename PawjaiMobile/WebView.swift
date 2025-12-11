@@ -18,10 +18,6 @@ struct WebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
 
-        // 🔥 CRITICAL FIX: Share process pool for cookie persistence across app restarts
-        // Without this, each WebView instance has isolated cookies
-        configuration.processPool = WKProcessPool.shared
-
         // Enable camera and microphone permissions
         configuration.allowsInlineMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = []
@@ -168,14 +164,10 @@ struct WebView: UIViewRepresentable {
 
             let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
             cookieStore.setCookie(cookie) { [weak self] in
-                print("✅ [Cookie Sync] WKHTTPCookieStore sync successful (attempt \(attempt + 1))")
-
                 // Verify cookie was set
                 cookieStore.getAllCookies { cookies in
                     let authCookie = cookies.first { $0.name == "pawjai-auth-session-pawjai-auth-storage" }
-                    if authCookie != nil {
-                        print("✅ [Cookie Sync] Cookie verified present")
-                    } else {
+                    if authCookie == nil {
                         print("⚠️ [Cookie Sync] Cookie verification failed on attempt \(attempt + 1)")
 
                         // Retry with exponential backoff (max 3 attempts)
@@ -235,8 +227,6 @@ struct WebView: UIViewRepresentable {
             webView.evaluateJavaScript(syncScript) { _, error in
                 if let error = error {
                     print("❌ [Cookie Sync] JavaScript fallback failed:", error.localizedDescription)
-                } else {
-                    print("✅ [Cookie Sync] JavaScript fallback successful")
                 }
             }
         }
@@ -271,9 +261,7 @@ struct WebView: UIViewRepresentable {
                 }
 
                 if let status = result as? String {
-                    if status == "present" {
-                        print("✅ [Session Verify] Cookie verified present")
-                    } else if status == "missing" {
+                    if status == "missing" {
                         print("⚠️ [Session Verify] Cookie MISSING - attempting recovery")
                         // Re-sync tokens if cookie missing
                         NotificationCenter.default.post(
@@ -315,8 +303,6 @@ struct WebView: UIViewRepresentable {
                 print("❌ [Secure Bridge] Invalid message format")
                 return
             }
-
-            print("🍎 [Secure Bridge] Setting HttpOnly cookies via WKHTTPCookieStore")
 
             // Create Supabase session format (same as cookieStorage expects)
             let sessionData: [String: Any] = [
@@ -362,15 +348,11 @@ struct WebView: UIViewRepresentable {
 
             // Set cookie via WKHTTPCookieStore (secure, native API)
             let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
-            cookieStore.setCookie(cookie) { [weak self] in
-                print("✅ [Secure Bridge] HttpOnly cookie set successfully")
-
+            cookieStore.setCookie(cookie) {
                 // Verify cookie was set
                 cookieStore.getAllCookies { cookies in
                     let authCookie = cookies.first { $0.name == "pawjai-auth-session-pawjai-auth-storage" }
-                    if authCookie != nil {
-                        print("✅ [Secure Bridge] Cookie verified present (\(byteSize) bytes)")
-                    } else {
+                    if authCookie == nil {
                         print("⚠️ [Secure Bridge] Cookie verification failed")
                     }
                 }
@@ -472,7 +454,6 @@ struct WebView: UIViewRepresentable {
                 // Only proceed if page is complete
                 if readyState != "complete" {
                     if retryCount < maxRetries {
-                        print("⏳ [Token Sync] Page not ready (state: \(readyState)), retrying... (\(retryCount + 1)/\(maxRetries))")
                         DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
                             self.syncAuthStorage(webView: webView, retryCount: retryCount + 1)
                         }
@@ -528,14 +509,8 @@ struct WebView: UIViewRepresentable {
                     if let error = error {
                         print("❌ [Token Sync] Script execution failed:", error.localizedDescription)
                     } else if let result = result as? String {
-                        if result == "refreshed" {
-                            print("✅ [Token Sync] Cookie refreshed successfully")
-                            // NOTE: This only refreshes the cookie max-age, not the actual tokens
-                            // Don't retry push registration here - wait for actual Supabase token refresh
-                        } else if result == "not_found" {
+                        if result == "not_found" {
                             print("⚠️ [Token Sync] No auth cookie found")
-                        } else {
-                            print("ℹ️ [Token Sync] Result:", result)
                         }
                     }
                 }
@@ -760,29 +735,5 @@ struct WebViewContainer: View {
                 currentURL = url
             }
         }
-    }
-}
-
-// MARK: - WKProcessPool Manager
-
-/// 🍎 SECURE: App-scoped process pool (not global singleton)
-/// This prevents memory leaks while ensuring cookie persistence
-class WebViewProcessPoolManager {
-    static let shared = WebViewProcessPoolManager()
-    let processPool = WKProcessPool()
-
-    private init() {
-        print("🍎 [ProcessPool] Initialized app-scoped process pool")
-    }
-
-    deinit {
-        print("🍎 [ProcessPool] Process pool deallocated")
-    }
-}
-
-extension WKProcessPool {
-    /// App-scoped shared process pool for cookie persistence
-    static var shared: WKProcessPool {
-        return WebViewProcessPoolManager.shared.processPool
     }
 }
